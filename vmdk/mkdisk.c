@@ -141,7 +141,7 @@ main(int argc,
 			while (di->vmt->nextData(di, &pos, &end) == 0) {
 				usedSpace += end - pos;
 			}
-			printf("//OK{ \"capacity\": %llu, \"used\": %llu }\n",
+			printf("{ \"capacity\": %llu, \"used\": %llu }\n",
 			       (unsigned long long)capacity, (unsigned long long)usedSpace);
 		} else {
 			const char *tgt;
