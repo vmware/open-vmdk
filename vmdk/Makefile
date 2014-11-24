@@ -29,7 +29,7 @@
 
 SRC := flat.c sparse.c mkdisk.c
 OUTPUTDIR := ../build/vmdk
-EXE := $(OUTPUTDIR)/mkdisk
+EXE := $(OUTPUTDIR)/vmdk-convert
 
 PREFIX ?= /usr
 
