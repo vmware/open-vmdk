@@ -31,6 +31,8 @@ SRC := flat.c sparse.c mkdisk.c
 OUTPUTDIR := ../build/vmdk
 EXE := $(OUTPUTDIR)/mkdisk
 
+PREFIX ?= /usr
+
 CC := gcc
 CFLAGS := -W -Wall -O2 -g
 LDFLAGS := -g -lz
@@ -56,6 +58,9 @@ $(addprefix $(OUTPUTDIR)/,sparse.o): vmware_vmdk.h
 
 check:
 	sparse -Wsparse-all -I/usr/include/x86_64-linux-gnu $(SRC)
+
+install:
+	mkdir -p $(DESTDIR)/$(PREFIX)/bin && cp $(EXE) $(DESTDIR)/$(PREFIX)/bin/
 
 clean:
 	rm -rf $(OUTPUTDIR)

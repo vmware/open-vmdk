@@ -31,7 +31,7 @@ DIRS := vmdk
 
 default:: all
 
-all:
+install all:
 	for x in $(DIRS); do $(MAKE) -C $$x $@; done
 
 clean:
