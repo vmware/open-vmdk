@@ -12,21 +12,21 @@ name=$1
 vmdk=$2
 ovftempl=$3
 
-if [ ! -f $vmdk ] ; then
+if [ ! -f "$vmdk" ] ; then
 	echo "$vmdk not found"
 	exit 2
 fi
 
-if [ ! -f $ovftempl ] ; then
+if [ ! -f "$ovftempl" ] ; then
 	echo "$ovftempl not found"
 	exit 2
 fi
 
-cp $vmdk $TMPDIR/${name}-disk1.vmdk
+cp "$vmdk" $TMPDIR/"${name}"-disk1.vmdk
 
-VMDK_FILE_SIZE=$(du -b $TMPDIR/${name}-disk1.vmdk | cut -f1)
+VMDK_FILE_SIZE=$(du -b $TMPDIR/"${name}-disk1.vmdk" | cut -f1)
 echo "vmdk file size is $VMDK_FILE_SIZE"
-VMDK_CAPACITY=$(vmdk-convert -i $vmdk | jq .capacity)
+VMDK_CAPACITY=$(vmdk-convert -i "$vmdk" | jq .capacity)
 echo "vmdk capacity is $VMDK_CAPACITY"
 sed ${ovftempl} \
 	-e "s/@@NAME@@/${name}/g" \
