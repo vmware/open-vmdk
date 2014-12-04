@@ -46,4 +46,4 @@ pushd $TMPDIR
 tar cf ../${name}.ova *.ovf *.mf *.vmdk
 popd
 
-#rm -rf $TMPDIR
+rm -rf $TMPDIR
