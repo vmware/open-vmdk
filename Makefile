@@ -27,7 +27,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 # ================================================================================
 
-DIRS := vmdk
+DIRS := vmdk ova
 
 default:: all
 
