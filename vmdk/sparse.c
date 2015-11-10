@@ -705,6 +705,8 @@ CoalescedPreaderInit(CoalescedPreader *p,
 {
 	p->fd = fd;
 	p->len = 0;
+	p->pos = 0;
+	p->buf = NULL;
 }
 
 static int
