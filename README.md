@@ -44,15 +44,22 @@ vmware.log
 1. Copy `testvm` folder to `TESTSVM_PATH` on the machine where you have `open-vmdk` installed.
 2. Convert vmfs raw data extent file of the VM to OVF streaming format.
 ```
-$ cd $TESTSVM_FOLDER
+$ cd $TESTSVM_PATH
 $ vmdk-converter testvm-flat.vmdk
 ```
-After converting, a new vmdk file `dst.vmdk` will be created under `$TESTSVM_FOLDER` folder.
+After converting, a new vmdk file `dst.vmdk` will be created under `$TESTSVM_PATH` folder.
 
-3. Run `mkova.sh` to create OVA.
+3. Run `mkova.sh` to create OVA with specific hardware version.
 ```
-$ mkova.sh testvm dst.vmdk $OPENVMDK_PATH/ova/template-hw10.ovf
+$ mkova.sh ova_name dst.vmdk path_to_template_ovf
 ```
-Where `$OPENVMDK_PATH` is the full path to your `open-vmdk-master` folder.
+Where,
+* _ova_name_ is your OVA name without .ova suffix.
+* _dst.vmdk_ is the new vmdk file converted in step 2.
+* _path_to_template_ovf_ is the path to .ovf template file. There are 4 .ovf templates files can be used.
+    * `ova/template.ovf` is the template for BIOS VM with hardware version 7.
+    * `ova/template-hw10.ovf` is the template for BIOS VM with hardware version 10.
+    * `ova/template-hw11-bios.ovf` is the template for BIOS VM with hardware version 11.
+    * `ova/template-hw11-uefi.ovf` is the template for UEFI VM with hardware version 11.
 
-4. Now you would be able to see the final OVA `testvm.ova` under your working directory.
+4. After `mkova.sh` completes, you would be able to see the final OVA under `$TESTSVM_PATH` folder.
