@@ -4,10 +4,6 @@ Open VMDK is an assistant tool for making OVA from vSphere virtual machine.
 
 ## Getting Started
 
-### Prerequisites
-
-Before you use open-vmdk, you need to have [jq](https://stedolan.github.io/jq/) installed in your machine. Please refer to https://stedolan.github.io/jq/download/ for jq installation.
-
 ### Installation
 Firstly, you need to download and extract [open-vmdk-master.zip](https://github.com/vmware/open-vmdk/archive/master.zip) and extract it:
 ```
