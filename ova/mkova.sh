@@ -44,7 +44,7 @@ cp "$vmdk" $TMPDIR/"${name}"-disk1.vmdk
 
 VMDK_FILE_SIZE=$(du -b $TMPDIR/"${name}-disk1.vmdk" | cut -f1)
 echo "vmdk file size is $VMDK_FILE_SIZE"
-VMDK_CAPACITY=$(vmdk-convert -i "$vmdk" | jq .capacity)
+VMDK_CAPACITY=$(vmdk-convert -i "$vmdk" | cut -d ',' -f 1 | awk '{print $NF}')
 echo "vmdk capacity is $VMDK_CAPACITY"
 sed ${ovftempl} \
 	-e "s/@@NAME@@/${name}/g" \
