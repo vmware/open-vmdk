@@ -54,8 +54,17 @@ sed ${ovftempl} \
 	-e "s/@@MEM_SIZE@@/$MEM_SIZE/g" \
 	> $TMPDIR/${name}.ovf
 
-echo "SHA1(${name}-disk1.vmdk)= $(sha1sum $TMPDIR/${name}-disk1.vmdk | cut -d' ' -f1)" > $TMPDIR/${name}.mf
-echo "SHA1(${name}.ovf)= $(sha1sum $TMPDIR/${name}.ovf | cut -d' ' -f1)" >> $TMPDIR/${name}.mf
+hw_version=$(grep "<vssd:VirtualSystemType>" $TMPDIR/${name}.ovf | sed 's#</*vssd:VirtualSystemType>##g' | cut -d '-' -f 2)
+if [ $hw_version -le 12 ]; then
+    echo "SHA1(${name}-disk1.vmdk)= $(sha1sum $TMPDIR/${name}-disk1.vmdk | cut -d' ' -f1)" > $TMPDIR/${name}.mf
+    echo "SHA1(${name}.ovf)= $(sha1sum $TMPDIR/${name}.ovf | cut -d' ' -f1)" >> $TMPDIR/${name}.mf
+elif [ $hw_version -eq 13 ] || [ $hw_version -eq 14 ]; then
+    echo "SHA256(${name}-disk1.vmdk)= $(sha256sum $TMPDIR/${name}-disk1.vmdk | cut -d' ' -f1)" > $TMPDIR/${name}.mf
+    echo "SHA256(${name}.ovf)= $(sha256sum $TMPDIR/${name}.ovf | cut -d' ' -f1)" >> $TMPDIR/${name}.mf
+elif [ $hw_version -gt 14 ]; then
+    echo "SHA512(${name}-disk1.vmdk)= $(sha512sum $TMPDIR/${name}-disk1.vmdk | cut -d' ' -f1)" > $TMPDIR/${name}.mf
+    echo "SHA512(${name}.ovf)= $(sha512sum $TMPDIR/${name}.ovf | cut -d' ' -f1)" >> $TMPDIR/${name}.mf
+fi
 
 pushd $TMPDIR 
 tar cf ../${name}.ova *.ovf *.mf *.vmdk
