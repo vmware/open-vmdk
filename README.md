@@ -46,18 +46,36 @@ $ cd $TESTSVM_PATH
 $ vmdk-converter testvm-flat.vmdk
 ```
 After converting, a new vmdk file `dst.vmdk` will be created under `$TESTSVM_PATH` folder.
+Or, you can specify the new vmdk file name by running
+```
+$ vmdk-converter testvm-flat.vmdk disk1.vmdk
+```
+After converting, a new vmdk file `disk1.vmdk` will be created under `$TESTSVM_PATH` folder.
 
 3. Run `mkova.sh` to create OVA with specific hardware version.
 ```
-$ mkova.sh ova_name dst.vmdk path_to_template_ovf
+$ mkova.sh ova_name path_to_ovf_template disk1.vmdk 
 ```
 Where,
 * _ova_name_ is your OVA name without .ova suffix.
 * _dst.vmdk_ is the new vmdk file converted in step 2.
-* _path_to_template_ovf_ is the path to .ovf template file. There are 4 .ovf templates files can be used.
+* _path_to_ovf_template_ is the path to .ovf template file. There are 8 .ovf templates files can be used.
     * `ova/template.ovf` is the template for BIOS VM with hardware version 7.
     * `ova/template-hw10.ovf` is the template for BIOS VM with hardware version 10.
     * `ova/template-hw11-bios.ovf` is the template for BIOS VM with hardware version 11.
     * `ova/template-hw11-uefi.ovf` is the template for UEFI VM with hardware version 11.
+    * `ova/template-hw13-bios.ovf` is the template for BIOS VM with hardware version 13.
+    * `ova/template-hw13-uefi.ovf` is the template for UEFI VM with hardware version 13.
+    * `ova/template-hw14-bios.ovf` is the template for BIOS VM with hardware version 14.
+    * `ova/template-hw14-uefi.ovf` is the template for UEFI VM with hardware version 14.
+
+If you want to add more than 1 disk into the OVA, firstly convert all flat vmdk files, and add new converted vmdk files by following path_to_ovf_template.
+For example, below command creates an OVA with 3 disks
+```
+$ mkova.sh ova_name path_to_ovf_template disk1.vmdk disk2.vmdk disk3.vmdk
+```
+Here mutiple disks are only supported to be attached to one SCSI controller, and at most 15 disks can be added in one OVA.
+
+By default, the OVA will be created with 2 cpus and 1024 MB memory. You can also use environment variable NUM_CPUS and MEM_SIZE to change the default number of cpu and memory size.
 
 4. After `mkova.sh` completes, you would be able to see the final OVA under `$TESTSVM_PATH` folder.
