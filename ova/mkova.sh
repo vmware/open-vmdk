@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ================================================================================
-# Copyright (c) 2014 VMware, Inc.  All Rights Reserved.                         
+# Copyright (c) 2014-2020 VMware, Inc.  All Rights Reserved.                         
 #                                                                               
 # Licensed under the Apache License, Version 2.0 (the “License”); you may not   
 # use this file except in compliance with the License.  You may obtain a copy of
@@ -76,9 +76,9 @@ for vmdk in $vmdks; do
    cp "$vmdk" $TMPDIR/"${vmdk_name}"
 
    vmdk_file_size=$(du -b $TMPDIR/"${vmdk_name}" | cut -f1)
-   echo "$vmdk file size is $vmdk_file_size"
+   echo "$vmdk file size is $vmdk_file_size bytes"
    vmdk_capacity=$(vmdk-convert -i "$vmdk" | cut -d ',' -f 1 | awk '{print $NF}')
-   echo "$vmdk capacity is $vmdk_capacity"
+   echo "$vmdk capacity is $vmdk_capacity bytes"
 
    if [ $index -eq 1 ]; then
       sed ${ovftempl} \

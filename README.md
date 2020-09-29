@@ -1,6 +1,6 @@
 # Open VMDK
 
-Open VMDK is an assistant tool for creating [Open Virtual Appliance (OVA)](https://en.wikipedia.org/wiki/Virtual_appliance). An OVA is a tar archive file with [Open Virtualization Format (OVF)](https://en.wikipedia.org/wiki/Open_Virtualization_Format) files inside, which is composed of an OVF descriptor with extension .ovf, a virtual machine disk image file with extension .vmdk, and a manifest file with extension .mf. 
+Open VMDK is an assistant tool for creating [Open Virtual Appliance (OVA)](https://en.wikipedia.org/wiki/Virtual_appliance). An OVA is a tar archive file with [Open Virtualization Format (OVF)](https://en.wikipedia.org/wiki/Open_Virtualization_Format) files inside, which is composed of an OVF descriptor with extension .ovf, a virtual machine disk image file with extension .vmdk, and a manifest file with extension .mf.
 
 OVA requires stream optimized disk image file (.vmdk) so that it can be easily streamed over a network link. This tool can convert flat disk image or sparse disk image to stream optimized disk image,  and then create OVA with the converted stream optimized disk image by using an OVF descriptor template.
 
@@ -52,9 +52,16 @@ $ vmdk-converter testvm-flat.vmdk disk1.vmdk
 ```
 After converting, a new vmdk file `disk1.vmdk` will be created under `$TESTSVM_PATH` folder.
 
+You can also set the VMware Tools version installed in your VM disk by add `-t` option
+```
+$ vmdk-converter -t 11264 testvm-flat.vmdk disk1.vmdk
+```
+This will set toolsVersion to 11264 in the metadata of disk1.vmdk. By default, the toolsVersion will be set to 2147483647.
+See https://packages.vmware.com/tools/versions for all released VMware Tools versions.
+
 3. Run `mkova.sh` to create OVA with specific hardware version.
 ```
-$ mkova.sh ova_name path_to_ovf_template disk1.vmdk 
+$ mkova.sh ova_name path_to_ovf_template disk1.vmdk
 ```
 Where,
 * _ova_name_ is your OVA name without .ova suffix.

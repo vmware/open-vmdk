@@ -1,5 +1,5 @@
 /* *******************************************************************************
- * Copyright (c) 2014 VMware, Inc.  All Rights Reserved.
+ * Copyright (c) 2014-2020 VMware, Inc.  All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the “License”); you may not
  * use this file except in compliance with the License.  You may obtain a copy of
@@ -87,6 +87,33 @@ failAll:
 	return false;
 }
 
+/* Displays the usage message. */
+static int
+printUsage(char *cmd)
+{
+	printf("Usage:\n");
+	printf("%s -i src.vmdk: displays information for specified virtual disk\n", cmd);
+	printf("%s [-t toolsVersion] src.vmdk dst.vmdk: converts source disk to destination disk with given tools version\n\n", cmd);
+
+	return 1;
+}
+
+/* Check a string is number */
+static bool
+isNumber(char *text)
+{
+	int j;
+	j = strlen(text);
+	while(j--)
+	{
+		if(text[j] >= '0' && text[j] <= '9')
+			continue;
+
+		return false;
+	}
+	return true;
+}
+
 int
 main(int argc,
      char *argv[])
@@ -95,18 +122,36 @@ main(int argc,
 	DiskInfo *di;
 	const char *src;
 	int opt;
-	int doInfo = 0;
+	bool doInfo = false;
+	bool doConvert = false;
 
 	gettimeofday(&tv, NULL);
 	srand48(tv.tv_sec ^ tv.tv_usec);
 
-	while ((opt = getopt(argc, argv, "i")) != -1) {
+	while ((opt = getopt(argc, argv, "it:")) != -1) {
 		switch (opt) {
 		case 'i':
-			doInfo = 1;
+			doInfo = true;
 			break;
+		case 't':
+			doConvert = true;
+			toolsVersion = optarg;
+			if (!isNumber(toolsVersion)){
+				fprintf(stderr, "Invalid tools version: %s\n", toolsVersion);
+				exit(1);
+			}
+			break;
+		case '?':
+			printUsage(argv[0]);
+			exit(1);
 		}
 	}
+
+	if (doInfo && doConvert) {
+		printUsage(argv[0]);
+		exit(1);
+	}
+
 	if (optind >= argc) {
 		src = "src.vmdk";
 	} else {
@@ -117,7 +162,7 @@ main(int argc,
 		di = Flat_Open(src);
 	}
 	if (di == NULL) {
-		fprintf(stderr, "Cannot open source disk: %s\n", strerror(errno));
+		fprintf(stderr, "Cannot open source disk %s: %s\n", src, strerror(errno));
 	} else {
 		if (doInfo) {
 			off_t capacity = di->vmt->getCapacity(di);
@@ -137,6 +182,7 @@ main(int argc,
 			} else {
 				tgt = argv[optind++];
 			}
+			printf("Starting to convert %s to %s...\n", src, tgt);
 			if (copyDisk(di, tgt)) {
 				printf("Success\n");
 			} else {
