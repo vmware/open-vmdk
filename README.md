@@ -20,11 +20,11 @@ $ cd open-vmdk-master
 $ make
 $ make install
 ```
-**Note**: After installation, `/usr/bin/vmdk-converter` and `/usr/bin/mkova.sh` will be installed. If you hope to change default installation place, such as `$HOME/bin/vmdk-converter`, specify "PREFIX" while running `make install`:
+**Note**: After installation, `/usr/bin/vmdk-convert` and `/usr/bin/mkova.sh` will be installed. If you hope to change default installation place, such as `$HOME/bin/vmdk-convert`, specify "PREFIX" while running `make install`:
 ```
 $ PREFIX=$HOME make install
 ```
-Thus, you will see the binary `vmdk-converter` and script `mkova.sh` under `$HOME/bin/`. In such case, make sure you have added `$HOME/bin` in your `PATH` environment variable.
+Thus, you will see the binary `vmdk-convert` and script `mkova.sh` under `$HOME/bin/`. In such case, make sure you have added `$HOME/bin` in your `PATH` environment variable.
 
 
 ### Usage
@@ -43,18 +43,18 @@ vmware.log
 2. Convert vmfs raw data extent file of the VM to OVF streaming format.
 ```
 $ cd $TESTSVM_PATH
-$ vmdk-converter testvm-flat.vmdk
+$ vmdk-convert testvm-flat.vmdk
 ```
 After converting, a new vmdk file `dst.vmdk` will be created under `$TESTSVM_PATH` folder.
 Or, you can specify the new vmdk file name by running
 ```
-$ vmdk-converter testvm-flat.vmdk disk1.vmdk
+$ vmdk-convert testvm-flat.vmdk disk1.vmdk
 ```
 After converting, a new vmdk file `disk1.vmdk` will be created under `$TESTSVM_PATH` folder.
 
 You can also set the VMware Tools version installed in your VM disk by add `-t` option
 ```
-$ vmdk-converter -t 11264 testvm-flat.vmdk disk1.vmdk
+$ vmdk-convert -t 11264 testvm-flat.vmdk disk1.vmdk
 ```
 This will set toolsVersion to 11264 in the metadata of disk1.vmdk. By default, the toolsVersion will be set to 2147483647.
 See https://packages.vmware.com/tools/versions for all released VMware Tools versions.
