@@ -1,18 +1,18 @@
 #!/bin/bash
 
 # ================================================================================
-# Copyright (c) 2014-2020 VMware, Inc.  All Rights Reserved.                         
-#                                                                               
-# Licensed under the Apache License, Version 2.0 (the “License”); you may not   
+# Copyright (c) 2014-2021 VMware, Inc.  All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the “License”); you may not
 # use this file except in compliance with the License.  You may obtain a copy of
 # the License at:
 #
-#              http://www.apache.org/licenses/LICENSE-2.0                     
-#                                                                                
+#              http://www.apache.org/licenses/LICENSE-2.0
+#
 # Unless required by applicable law or agreed to in writing, software distributed
-# under the License is distributed on an “AS IS” BASIS, without warranties or   
-# conditions of any kind, EITHER EXPRESS OR IMPLIED.  See the License for the   
-# specific language governing permissions and limitations under the License.    
+# under the License is distributed on an “AS IS” BASIS, without warranties or
+# conditions of any kind, EITHER EXPRESS OR IMPLIED.  See the License for the
+# specific language governing permissions and limitations under the License.
 # ================================================================================
 
 TMPDIR=$(mktemp -p . -d XXXXXXXX)
@@ -132,7 +132,7 @@ done
 # Get the sha checksum of the ovf file
 echo "SHA${sha_alg}(${name}.ovf)= $(sha${sha_alg}sum $TMPDIR/${name}.ovf | cut -d' ' -f1)" >> $TMPDIR/${name}.mf
 
-pushd $TMPDIR 
+pushd $TMPDIR
 tar cf ../${name}.ova *.ovf *.mf *.vmdk
 popd
 

@@ -1,17 +1,17 @@
 #! /usr/bin/python3
 
-# Copyright (c) 2014-2020 VMware, Inc.  All Rights Reserved.                         
-#                                                                               
-# Licensed under the Apache License, Version 2.0 (the “License”); you may not   
+# Copyright (c) 2014-2021 VMware, Inc.  All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the “License”); you may not
 # use this file except in compliance with the License.  You may obtain a copy of
 # the License at:
 #
-#        http://www.apache.org/licenses/LICENSE-2.0                     
-#                                                                                
+#        http://www.apache.org/licenses/LICENSE-2.0
+#
 # Unless required by applicable law or agreed to in writing, software distributed
-# under the License is distributed on an “AS IS” BASIS, without warranties or   
-# conditions of any kind, EITHER EXPRESS OR IMPLIED.  See the License for the   
-# specific language governing permissions and limitations under the License.    
+# under the License is distributed on an “AS IS” BASIS, without warranties or
+# conditions of any kind, EITHER EXPRESS OR IMPLIED.  See the License for the
+# specific language governing permissions and limitations under the License.
 
 import json
 import os.path
@@ -83,7 +83,7 @@ def unescape(value):
         ret.append(ord('|'))
         ret += state
     return ret.decode("utf-8")
-       
+
 def parseLine(line):
     name = ''
     value = ''
@@ -343,7 +343,7 @@ def writeXMLFile(f, vmc, disks):
                     rasdElement(dsk, 'AddressOnParent', d)
                     rasdElement(dsk, 'HostResource', "ovf:/disk/%s" % dd[2])
                     rasdElement(dsk, 'Parent', ctlrId)
-                    
+
     if vmc.getBool(False, "vmci0.present"):
         vmci = addItem(hw, False, 'vmci', 1)
         rasdElement(vmci, 'AutomaticAllocation', 'false')
@@ -408,8 +408,8 @@ def convertDisks(disks):
         if out.startswith("//OK"):
            v[3] = json.loads(out[4:])
         seq += 1
-       
-        
+
+
 def main():
     with open(sys.argv[1], "r") as f:
         vmc = parseConfig(os.path.dirname(sys.argv[1]), f)

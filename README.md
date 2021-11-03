@@ -56,8 +56,9 @@ You can also set the VMware Tools version installed in your VM disk by add `-t` 
 ```
 $ vmdk-convert -t 11264 testvm-flat.vmdk disk1.vmdk
 ```
-This will set toolsVersion to 11264 in the metadata of disk1.vmdk. By default, the toolsVersion will be set to 2147483647.
+This will set `ddb.toolsVersion` to 11264 in the metadata of disk1.vmdk. By default, the `ddb.toolsVersion` will be set to 2147483647.
 See https://packages.vmware.com/tools/versions for all released VMware Tools versions.
+See https://kb.vmware.com/s/article/83068 for instructions to add `ddb.toolsVersion` to an exiting OVF/OVA template.
 
 3. Run `mkova.sh` to create OVA with specific hardware version.
 ```
