@@ -35,7 +35,7 @@ struct DiskInfo {
 	const DiskInfoVMT *vmt;
 };
 
-char *toolsVersion; /* toolsVersion in metadata */
+extern char *toolsVersion; /* toolsVersion in metadata */
 
 DiskInfo *Flat_Open(const char *fileName);
 DiskInfo *Flat_Create(const char *fileName, off_t capacity);

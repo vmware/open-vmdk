@@ -24,6 +24,8 @@
 #include <string.h>
 #include <getopt.h>
 
+char *toolsVersion; /* toolsVersion in metadata */
+
 static int
 copyData(DiskInfo *dst,
          off_t dstOffset,
