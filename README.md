@@ -60,22 +60,40 @@ This will set `ddb.toolsVersion` to 11264 in the metadata of disk1.vmdk. By defa
 See https://packages.vmware.com/tools/versions for all released VMware Tools versions.
 See https://kb.vmware.com/s/article/83068 for instructions to add `ddb.toolsVersion` to an exiting OVF/OVA template.
 
-3. Run `mkova.sh` to create OVA with specific hardware version.
+3. Export environment variables for OVA settings
+By default, the OVA will be created with 2 cpus and 1024 MB memory. For VM with hardware version 15 or later, the default OVA firmware is efi. To change default OVA settings, you can export below environment variables before executing `mkova.sh` command:
+* `NUM_CPUS`: The number of CPUs of the OVA template. Default value is `2`.
+* `MEM_SIZE`: The memory size in MB of the OVA template. Default value is `1024`.
+* `FIRMWARE`: The firmare of the OVA template. Default value is `efi`.
+
+For example,
+```
+export NUM_CPUS=4
+export MEM_SIZE=4096
+export FIRMWARE=bios
+```
+
+4. Run `mkova.sh` to create OVA with specific hardware version.
 ```
 $ mkova.sh ova_name path_to_ovf_template disk1.vmdk
 ```
 Where,
 * _ova_name_ is your OVA name without .ova suffix.
 * _dst.vmdk_ is the new vmdk file converted in step 2.
-* _path_to_ovf_template_ is the path to .ovf template file. There are 8 .ovf templates files can be used.
+* _path_to_ovf_template_ is the path to .ovf template file. Below .ovf templates files can be used.
     * `ova/template.ovf` is the template for BIOS VM with hardware version 7.
     * `ova/template-hw10.ovf` is the template for BIOS VM with hardware version 10.
     * `ova/template-hw11-bios.ovf` is the template for BIOS VM with hardware version 11.
-    * `ova/template-hw11-uefi.ovf` is the template for UEFI VM with hardware version 11.
+    * `ova/template-hw11-uefi.ovf` is the template for EFI VM with hardware version 11.
     * `ova/template-hw13-bios.ovf` is the template for BIOS VM with hardware version 13.
-    * `ova/template-hw13-uefi.ovf` is the template for UEFI VM with hardware version 13.
+    * `ova/template-hw13-uefi.ovf` is the template for EFI VM with hardware version 13.
     * `ova/template-hw14-bios.ovf` is the template for BIOS VM with hardware version 14.
-    * `ova/template-hw14-uefi.ovf` is the template for UEFI VM with hardware version 14.
+    * `ova/template-hw14-uefi.ovf` is the template for EFI VM with hardware version 14.
+    * `ova/template-hw15.ovf` is the template for EFI or BIOS VM with hardware version 15.
+    * `ova/template-hw17.ovf` is the template for EFI or BIOS VM with hardware version 17.
+    * `ova/template-hw18.ovf` is the template for EFI or BIOS VM with hardware version 18.
+    * `ova/template-hw19.ovf` is the template for EFI or BIOS VM with hardware version 19.
+    * `ova/template-hw20.ovf` is the template for EFI or BIOS VM with hardware version 20.
 
 If you want to add more than 1 disk into the OVA, firstly convert all flat vmdk files, and add new converted vmdk files by following path_to_ovf_template.
 For example, below command creates an OVA with 3 disks
@@ -84,6 +102,4 @@ $ mkova.sh ova_name path_to_ovf_template disk1.vmdk disk2.vmdk disk3.vmdk
 ```
 Here mutiple disks are only supported to be attached to one SCSI controller, and at most 15 disks can be added in one OVA.
 
-By default, the OVA will be created with 2 cpus and 1024 MB memory. You can also use environment variable NUM_CPUS and MEM_SIZE to change the default number of cpu and memory size.
-
-4. After `mkova.sh` completes, you would be able to see the final OVA under `$TESTSVM_PATH` folder.
+5. After `mkova.sh` completes, you would be able to see the final OVA under `$TESTSVM_PATH` folder.
