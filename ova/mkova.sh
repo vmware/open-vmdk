@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ================================================================================
-# Copyright (c) 2014-2021 VMware, Inc.  All Rights Reserved.
+# Copyright (c) 2014-2023 VMware, Inc.  All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the “License”); you may not
 # use this file except in compliance with the License.  You may obtain a copy of
@@ -19,10 +19,16 @@ TMPDIR=$(mktemp -p . -d XXXXXXXX)
 
 [ ! -n "$NUM_CPUS" ] && NUM_CPUS=2
 [ ! -n "$MEM_SIZE" ] && MEM_SIZE=1024
+[ ! -n "$FIRMWARE" ] && FIRMWARE="efi"
 
 if [ "$#" -lt 3 ] ; then
-    echo "$#"
-    echo "usage: $0 ova_name path_to_ovf_template disk1.vmdk [disk2.vmdk disk3.vmdk ...]"
+    echo "Usage: $0 ova_name path_to_ovf_template disk1.vmdk [disk2.vmdk disk3.vmdk ...]"
+    echo "Create an OVA template from VMDK files"
+    echo ""
+    echo "Environment variables can be used to change OVA settings:"
+    echo "* NUM_CPUS: The CPU numbers of the OVA template. Default value is 2."
+    echo "* MEM_SIZE: The memory size in MB of the OVA template. Default value is 1024."
+    echo "* FIRMWARE: The firmware of the OVA template: efi or bios. Default value is efi."
     exit 1
 fi
 
@@ -87,6 +93,7 @@ for vmdk in $vmdks; do
           -e "s/@@VMDK_CAPACITY@@/$vmdk_capacity/g" \
           -e "s/@@NUM_CPUS@@/$NUM_CPUS/g" \
           -e "s/@@MEM_SIZE@@/$MEM_SIZE/g" \
+          -e "s/@@FIRMWARE@@/$FIRMWARE/g" \
           > $TMPDIR/${name}.ovf
    else
        # Insert disk file information for Hard Disk 2, 3, 4, etc
