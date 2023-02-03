@@ -7,25 +7,31 @@ OVA requires stream optimized disk image file (.vmdk) so that it can be easily s
 ## Getting Started
 
 ### Installation
-Firstly, you need to download and extract [open-vmdk-master.zip](https://github.com/vmware/open-vmdk/archive/master.zip) and extract it:
+Clone the repository, like `git clone https://github.com/vmware/open-vmdk`.
+
+Alternatively, download and extract it:
+```
+curl -O https://github.com/vmware/open-vmdk/archive/master.tar.gz
+tar zxf master.tar.gz
+```
+or if you prefer `get` and `zip`:
 ```
 $ wget https://github.com/vmware/open-vmdk/archive/master.zip
 $ unzip master.zip
 ```
 
-Then, run below commands to build and install it:
+Run below commands to build and install:
 
 ```
 $ cd open-vmdk-master
 $ make
 $ make install
 ```
-**Note**: After installation, `/usr/bin/vmdk-convert` and `/usr/bin/mkova.sh` will be installed. If you hope to change default installation place, such as `$HOME/bin/vmdk-convert`, specify "PREFIX" while running `make install`:
-```
-$ PREFIX=$HOME make install
-```
-Thus, you will see the binary `vmdk-convert` and script `mkova.sh` under `$HOME/bin/`. In such case, make sure you have added `$HOME/bin` in your `PATH` environment variable.
 
+You can change the prefix with `PREXIX` (default is `usr`) or the installation directory with `DESTDIR` for packaging, for example:
+```
+$ make DESTDIR=/tmp/open-vmdk install
+```
 
 ### Usage
 
