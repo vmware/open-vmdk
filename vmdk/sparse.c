@@ -147,7 +147,7 @@ makeDiskDescriptorFile(const char *fileName,
                        uint64_t capacity,
                        uint32_t cid)
 {
-	static const char ddfConst[] =
+	static const char ddfTemplate[] =
 "# Disk DescriptorFile\n"
 "version=1\n"
 "encoding=\"UTF-8\"\n"
@@ -167,47 +167,20 @@ makeDiskDescriptorFile(const char *fileName,
 "ddb.geometry.heads = \"255\"\n" /* 255/63 is good for anything bigger than 4GB. */
 "ddb.geometry.sectors = \"63\"\n"
 "ddb.adapterType = \"lsilogic\"\n"
-"ddb.toolsVersion = \""; /* open-vm-tools version */
+"ddb.toolsInstallType = \"4\"\n" /* unmanaged (open-vm-tools) */
+"ddb.toolsVersion = \"%s\""; /* open-vm-tools version */
 
 	unsigned int cylinders;
 	char *ret;
-	char *ddbToolsVersion;
-	char *ddfTemplate;
-	size_t ddfConstLen, ddbToolsVerLen, ddfTemplLen;
-
-	/* Set ddb.toolsVersion */
-	if (toolsVersion != NULL && strlen(toolsVersion) >= 1) {
-		ddbToolsVersion = toolsVersion;
-	} else {
-		ddbToolsVersion = "2147483647"; /* default tools version */
-	}
-
-	ddfConstLen = strlen(ddfConst);
-	ddbToolsVerLen = strlen(ddbToolsVersion);
-
-	/* Need to add a quote(") and new line (\n) character at the end */
-	ddfTemplLen = ddfConstLen + ddbToolsVerLen + 3;
-	ddfTemplate = (char *) malloc(ddfTemplLen * sizeof(char));
-	if (!ddfTemplate) {
-		return NULL;
-	}
-	memset(ddfTemplate, '\0', ddfTemplLen * sizeof(char));
-
-	strncpy(ddfTemplate, ddfConst, ddfConstLen);
-	/* Append toolsVersion to the end of ddfTemplate */
-	strncat(ddfTemplate, ddbToolsVersion, ddbToolsVerLen);
-	strncat(ddfTemplate, "\"\n", 2);
 
 	if (capacity > 65535 * 255 * 63) {
 		cylinders = 65535;
 	} else {
 		cylinders = CEILING(capacity, 255 * 63);
 	}
-	if (asprintf(&ret, ddfTemplate, cid, (long long int)capacity, fileName, (uint32_t)mrand48(), (uint32_t)mrand48(), (uint32_t)mrand48(), cid, cylinders) == -1) {
-		free(ddfTemplate);
+	if (asprintf(&ret, ddfTemplate, cid, (long long int)capacity, fileName, (uint32_t)mrand48(), (uint32_t)mrand48(), (uint32_t)mrand48(), cid, cylinders, toolsVersion) == -1) {
 		return NULL;
 	}
-	free(ddfTemplate);
 	return ret;
 }
 

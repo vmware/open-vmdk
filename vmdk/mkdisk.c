@@ -24,7 +24,9 @@
 #include <string.h>
 #include <getopt.h>
 
-char *toolsVersion; /* toolsVersion in metadata */
+/* toolsVersion in metadata -
+   default is 2^31-1 (unknown) */
+char *toolsVersion = "2147483647";
 
 static int
 copyData(DiskInfo *dst,
