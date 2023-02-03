@@ -14,7 +14,7 @@ Alternatively, download and extract it:
 curl -O https://github.com/vmware/open-vmdk/archive/master.tar.gz
 tar zxf master.tar.gz
 ```
-or if you prefer `get` and `zip`:
+or if you prefer `wget` and `zip`:
 ```
 $ wget https://github.com/vmware/open-vmdk/archive/master.zip
 $ unzip master.zip
