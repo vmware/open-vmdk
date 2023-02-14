@@ -908,7 +908,7 @@ Sparse_Open(const char *fileName)
 	SparseExtentHeaderOnDisk onDisk;
 	uint32_t i;
 	uint32_t *gt;
-	CoalescedPreader cp;
+	CoalescedPreader cp = {0};
 
 	fd = open(fileName, O_RDONLY);
 	if (fd == -1) {
