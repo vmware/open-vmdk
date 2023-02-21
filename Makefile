@@ -13,7 +13,7 @@
 # specific language governing permissions and limitations under the License.    
 # ================================================================================
 
-DIRS := vmdk ova
+DIRS := vmdk ova templates
 
 default:: all
 
