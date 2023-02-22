@@ -15,20 +15,43 @@
 # specific language governing permissions and limitations under the License.
 # ================================================================================
 
-TMPDIR=$(mktemp -p . -d XXXXXXXX)
-
-[ ! -n "$NUM_CPUS" ] && NUM_CPUS=2
-[ ! -n "$MEM_SIZE" ] && MEM_SIZE=1024
-[ ! -n "$FIRMWARE" ] && FIRMWARE="efi"
-
-if [ "$#" -lt 3 ] ; then
-    echo "Usage: $0 ova_name path_to_ovf_template disk1.vmdk [disk2.vmdk disk3.vmdk ...]"
+usage() {
+    echo "Usage: $0 [-n|--num-cpus <num_cpus>] [-m|--mem-size <mem_size>] [-f|--firmware efi|bios] ova_name path_to_ovf_template disk1.vmdk [disk2.vmdk [...]]"
     echo "Create an OVA template from VMDK files"
     echo ""
     echo "Environment variables can be used to change OVA settings:"
     echo "* NUM_CPUS: The CPU numbers of the OVA template. Default value is 2."
     echo "* MEM_SIZE: The memory size in MB of the OVA template. Default value is 1024."
     echo "* FIRMWARE: The firmware of the OVA template: efi or bios. Default value is efi."
+}
+
+[ ! -n "$NUM_CPUS" ] && NUM_CPUS=2
+[ ! -n "$MEM_SIZE" ] && MEM_SIZE=1024
+[ ! -n "$FIRMWARE" ] && FIRMWARE="efi"
+
+OPTS=$(getopt -o n:m:f: --long num-cpus:,mem-size:,firmware: -n $0 -- "$@")
+if [ $? != 0 ] ; then
+    usage
+    echo "Terminating." >&2
+    exit 1
+fi
+
+eval set -- "$OPTS"
+
+while true; do
+    case "$1" in
+        -n | --num-cpus) NUM_CPUS=${2} ; shift 2 ;;
+        -m | --mem-size) MEM_SIZE=${2} ; shift 2 ;;
+        -f | --firmware) FIRMWARE=${2} ; shift 2 ;;
+        --) shift; break ;;
+        *) break ;;
+    esac
+done
+
+if [ "$#" -lt 3 ] ; then
+    echo "need at least 3 arguments" >&2
+    usage
+    echo "Terminating." >&2
     exit 1
 fi
 
@@ -39,7 +62,10 @@ shift
 vmdks=$@
 vmdks_num=$#
 
-echo "Starting to create ${name}.ova of ${vmdks_num} disks with template ${ovftempl}"
+echo "Starting to create ${name}.ova with ${vmdks_num} disk(s) with template ${ovftempl}"
+echo "Number of CPUs: ${NUM_CPUS}"
+echo "Memory in MB: ${MEM_SIZE}"
+echo "Firmware Type: ${FIRMWARE}"
 
 for vmdk in $vmdks; do
     if [ ! -f "$vmdk" ] ; then
@@ -73,6 +99,8 @@ next_id=$((max_id+1))
 
 # Get vmdk parent id
 disk_parent_id=`sed -n '/Hard Disk 1/,+3p' $ovftempl | grep Parent | sed 's/[^0-9]*//g'`
+
+TMPDIR=$(mktemp -p . -d XXXXXXXX)
 
 index=1
 for vmdk in $vmdks; do
