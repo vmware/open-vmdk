@@ -21,4 +21,5 @@ all:
 
 install:
 	mkdir -p $(DESTDIR)/$(PREFIX)/bin && cp $(EXE) $(DESTDIR)/$(PREFIX)/bin/
+	[ -f $(DESTDIR)/etc/open-vmdk.conf ] || echo "PREFIX=${PREFIX}" > $(DESTDIR)/etc/open-vmdk.conf
 
