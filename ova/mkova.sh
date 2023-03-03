@@ -15,31 +15,82 @@
 # specific language governing permissions and limitations under the License.
 # ================================================================================
 
-TMPDIR=$(mktemp -p . -d XXXXXXXX)
+[ -f /etc/open-vmdk.conf ] && . /etc/open-vmdk.conf
+
+[ ! -n "$PREFIX" ] && PREFIX=/usr
+[ ! -n "$DATADIR" ] && DATADIR=${PREFIX}/share/open-vmdk
+# default template should be the latest:
+[ ! -n "$OVFTEMPL" ] && OVFTEMPL=${DATADIR}/template-hw20.ovf
 
 [ ! -n "$NUM_CPUS" ] && NUM_CPUS=2
 [ ! -n "$MEM_SIZE" ] && MEM_SIZE=1024
 [ ! -n "$FIRMWARE" ] && FIRMWARE="efi"
 
-if [ "$#" -lt 3 ] ; then
-    echo "Usage: $0 ova_name path_to_ovf_template disk1.vmdk [disk2.vmdk disk3.vmdk ...]"
+usage() {
+    echo "Usage: $0"
+    echo "          [-n|--num-cpus <num_cpus>]"
+    echo "          [-m|--mem-size <mem_size>]"
+    echo "          [-f|--firmware efi|bios]"
+    echo "          [--hw <version>]"
+    echo "          [--template <path_to_template>]"
+    echo "          [--ovf]"
+    echo "          ova_name disk1.vmdk [disk2.vmdk [...]]"
+    echo ""
     echo "Create an OVA template from VMDK files"
     echo ""
     echo "Environment variables can be used to change OVA settings:"
     echo "* NUM_CPUS: The CPU numbers of the OVA template. Default value is 2."
     echo "* MEM_SIZE: The memory size in MB of the OVA template. Default value is 1024."
     echo "* FIRMWARE: The firmware of the OVA template: efi or bios. Default value is efi."
+}
+
+OPTS=$(getopt -o n:m:f: --long num-cpus:,mem-size:,firmware:,hw:,template:,ovf -n $0 -- "$@")
+if [ $? != 0 ] ; then
+    usage
+    echo "Terminating." >&2
+    exit 1
+fi
+
+eval set -- "$OPTS"
+
+ovftempl=${OVFTEMPL}
+ovf=false
+
+while true; do
+    case "$1" in
+        -n | --num-cpus) NUM_CPUS=${2} ; shift 2 ;;
+        -m | --mem-size) MEM_SIZE=${2} ; shift 2 ;;
+        -f | --firmware) FIRMWARE=${2} ; shift 2 ;;
+        --hw) ovftempl=${DATADIR}/template-hw${2}.ovf ; shift 2 ;;
+        --template) ovftempl=${2} ; shift 2 ;;
+        --ovf) ovf="true" ; shift ;;
+        --) shift; break ;;
+        *) break ;;
+    esac
+done
+
+if [ "$#" -lt 2 ] ; then
+    echo "need at least 2 arguments" >&2
+    usage
+    echo "Terminating." >&2
     exit 1
 fi
 
 name=$1
-ovftempl=$2
 shift
-shift
+# for backwards compatibility:
+if [ "${1: -4}" == ".ovf" ] ; then
+    echo "Specifying the template as an argument is deprecated. Please use the --template or the --hw option."
+    ovftempl=$1
+    shift
+fi
 vmdks=$@
 vmdks_num=$#
 
-echo "Starting to create ${name}.ova of ${vmdks_num} disks with template ${ovftempl}"
+echo "Starting to create ${name}.ova with ${vmdks_num} disk(s) with template ${ovftempl}"
+echo "Number of CPUs: ${NUM_CPUS}"
+echo "Memory in MB: ${MEM_SIZE}"
+echo "Firmware Type: ${FIRMWARE}"
 
 for vmdk in $vmdks; do
     if [ ! -f "$vmdk" ] ; then
@@ -73,6 +124,8 @@ next_id=$((max_id+1))
 
 # Get vmdk parent id
 disk_parent_id=`sed -n '/Hard Disk 1/,+3p' $ovftempl | grep Parent | sed 's/[^0-9]*//g'`
+
+TMPDIR=$(mktemp -p . -d XXXXXXXX)
 
 index=1
 for vmdk in $vmdks; do
@@ -139,10 +192,21 @@ done
 # Get the sha checksum of the ovf file
 echo "SHA${sha_alg}(${name}.ovf)= $(sha${sha_alg}sum $TMPDIR/${name}.ovf | cut -d' ' -f1)" >> $TMPDIR/${name}.mf
 
-pushd $TMPDIR
-tar cf ../${name}.ova *.ovf *.mf *.vmdk
-popd
+if [ ${ovf} == "true" ] ; then
+    if [ -d ${name} ] ; then
+        echo "directory ${name} exists" >&2
+        echo "Terminating." >&2
+        exit 3
+    fi
+    mv $TMPDIR ${name}
+    echo "Completed to create ovf files in directory ${name}"
+else
+    pushd $TMPDIR
+    tar --format=ustar -cf ../${name}.ova *.ovf *.mf *.vmdk
+    popd
 
-echo "Completed to create ${name}.ova"
+    echo "Completed to create ${name}.ova"
 
-rm -rf $TMPDIR
+    rm -rf $TMPDIR
+fi
+

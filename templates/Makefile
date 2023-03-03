@@ -13,13 +13,10 @@
 # specific language governing permissions and limitations under the License.
 # ================================================================================
 
-EXE=mkova.sh
-
 PREFIX ?= /usr
+DATADIR ?= $(PREFIX)/share/open-vmdk
 
 all:
 
 install:
-	mkdir -p $(DESTDIR)/$(PREFIX)/bin && cp $(EXE) $(DESTDIR)/$(PREFIX)/bin/
-	[ -f $(DESTDIR)/etc/open-vmdk.conf ] || echo "PREFIX=${PREFIX}" > $(DESTDIR)/etc/open-vmdk.conf
-
+	mkdir -p $(DESTDIR)/$(DATADIR)/ && cp *.ovf $(DESTDIR)/$(DATADIR)

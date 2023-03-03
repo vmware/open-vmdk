@@ -4,6 +4,10 @@ Open VMDK is an assistant tool for creating [Open Virtual Appliance (OVA)](https
 
 OVA requires stream optimized disk image file (.vmdk) so that it can be easily streamed over a network link. This tool can convert flat disk image or sparse disk image to stream optimized disk image,  and then create OVA with the converted stream optimized disk image by using an OVF descriptor template.
 
+The VMDK format specification can be downloaded at https://www.vmware.com/app/vmdk/?src=vmdk (pdf).
+
+The OVF/OVA specification can be found at https://www.dmtf.org/standards/ovf
+
 ## Getting Started
 
 ### Installation
@@ -35,6 +39,8 @@ $ make DESTDIR=/tmp/open-vmdk install
 
 ### Usage
 
+#### Existing VM
+
 Below example shows how to create an [Open Virtual Appliance (OVA)](https://en.wikipedia.org/wiki/Virtual_appliance) from vSphere virtual machine. Presume the virtual machine's name is `testvm`, and virtual machine files include:
 ```
 testvm-312d29db.hlog
@@ -56,56 +62,100 @@ Or, you can specify the new vmdk file name by running
 ```
 $ vmdk-convert testvm-flat.vmdk disk1.vmdk
 ```
-After converting, a new vmdk file `disk1.vmdk` will be created under `$TESTSVM_PATH` folder.
 
-You can also set the VMware Tools version installed in your VM disk by add `-t` option
+#### New VM
+
+`vmdk-convert` can process raw disk images to streamable `vmdk` images. For example (as root):
 ```
-$ vmdk-convert -t 11264 testvm-flat.vmdk disk1.vmdk
+dd if=/dev/zero of=testvm.img bs=1M count=4096
+LOOP_DEVICE=$(losetup --show -f testvm.img)
+... format disk to loop device and install OS into image ...
+losetup -d $LOOP_DEVICE
+vmdk-convert testvm.img testvm.vmdk
 ```
-This will set `ddb.toolsVersion` to 11264 in the metadata of disk1.vmdk. By default, the `ddb.toolsVersion` will be set to 2147483647.
+
+#### Set the VMware Tools version
+
+Set the VMware Tools version installed in your VM disk by adding the `-t` option.
+The tools version is a number calculated from the version string `x.y.z` using the formulae `1024*x + 32*y + z`.
+So for example for the version `12.1.5` the number would be `1024 * 12 + 1 * 32 + 5` = `12325`.
+```
+$ vmdk-convert -t 12325 testvm-flat.vmdk disk1.vmdk
+```
+This will set `ddb.toolsVersion` to 12325 in the metadata of disk1.vmdk. By default, the `ddb.toolsVersion` will be set to 2147483647 (MAXINT, or `2^31-1`).
 See https://packages.vmware.com/tools/versions for all released VMware Tools versions.
 See https://kb.vmware.com/s/article/83068 for instructions to add `ddb.toolsVersion` to an exiting OVF/OVA template.
 
-3. Export environment variables for OVA settings
-By default, the OVA will be created with 2 cpus and 1024 MB memory. For VM with hardware version 15 or later, the default OVA firmware is efi. To change default OVA settings, you can export below environment variables before executing `mkova.sh` command:
-* `NUM_CPUS`: The number of CPUs of the OVA template. Default value is `2`.
-* `MEM_SIZE`: The memory size in MB of the OVA template. Default value is `1024`.
-* `FIRMWARE`: The firmare of the OVA template. Default value is `efi`.
+#### Create an OVA
 
-For example,
+##### Hardware Options
+
+By default, the OVA will be created with 2 CPUs and 1024 MB memory. For VMs with hardware version 11 or later, the default OVA firmware is `efi`.
+These defaults can be changed with options to `mkova.sh`:
+
+* `--num-cpus`: The number of CPUs of the OVA template. Default value is `2`.
+* `--mem-size`: The memory size in MB of the OVA template. Default value is `1024`.
+* `--firmware`: The firmare of the OVA template (`efi` or `bios`). Default value is `efi`.
+
+These settings can also be set with the environment variables `NUM_CPUS`, `MEM_SIZE` and `FIRMWARE`,
+for example in the configuration file (see below).
+
+For hardware versions 7 and 10 only `bios` is supported as firmware.
+
+##### Selecting the Template
+
+The template is an OVF file with place holders and provides settings for a pre-configured VM.
+It will be used to create the final OVF.
+The template file can be selected in two ways - either directly with the `--template` option,
+or by using the `--hw` option to specify the hardware version.
+
+By default, the latest available template will be used.
+
+Example: run `mkova.sh` to create OVA with specific hardware version (20):
 ```
-export NUM_CPUS=4
-export MEM_SIZE=4096
-export FIRMWARE=bios
+$ mkova.sh --num-cpus 4 --mem-size 4096 --firmware bios --hw 20 ova_name disk1.vmdk
 ```
 
-4. Run `mkova.sh` to create OVA with specific hardware version.
+Note that templates do not exist for every possible hardware version.
+
+Example: run `mkova.sh` to create OVA with a specific template:
 ```
-$ mkova.sh ova_name path_to_ovf_template disk1.vmdk
+$ mkova.sh --num-cpus 4 --mem-size 4096 --firmware bios --template /usr/share/open-vmdk/template-hw20.ovf ova_name disk1.vmdk
 ```
+
 Where,
 * _ova_name_ is your OVA name without .ova suffix.
 * _dst.vmdk_ is the new vmdk file converted in step 2.
 * _path_to_ovf_template_ is the path to .ovf template file. Below .ovf templates files can be used.
-    * `ova/template.ovf` is the template for BIOS VM with hardware version 7.
-    * `ova/template-hw10.ovf` is the template for BIOS VM with hardware version 10.
-    * `ova/template-hw11-bios.ovf` is the template for BIOS VM with hardware version 11.
-    * `ova/template-hw11-uefi.ovf` is the template for EFI VM with hardware version 11.
-    * `ova/template-hw13-bios.ovf` is the template for BIOS VM with hardware version 13.
-    * `ova/template-hw13-uefi.ovf` is the template for EFI VM with hardware version 13.
-    * `ova/template-hw14-bios.ovf` is the template for BIOS VM with hardware version 14.
-    * `ova/template-hw14-uefi.ovf` is the template for EFI VM with hardware version 14.
-    * `ova/template-hw15.ovf` is the template for EFI or BIOS VM with hardware version 15.
-    * `ova/template-hw17.ovf` is the template for EFI or BIOS VM with hardware version 17.
-    * `ova/template-hw18.ovf` is the template for EFI or BIOS VM with hardware version 18.
-    * `ova/template-hw19.ovf` is the template for EFI or BIOS VM with hardware version 19.
-    * `ova/template-hw20.ovf` is the template for EFI or BIOS VM with hardware version 20.
+    * `templates/template-hw7.ovf` is the template for a VM with BIOS firmware with hardware version 7.
+    * `templates/template-hw10.ovf` is the template for a VM with BIOS firmware with hardware version 10.
+    * `templates/template-hw11.ovf` is the template for hardware version 11.
+    * `templates/template-hw13.ovf` is the template for hardware version 13.
+    * `templates/template-hw14.ovf` is the template for hardware version 14.
+    * `templates/template-hw15.ovf` is the template for hardware version 15.
+    * `templates/template-hw17.ovf` is the template for hardware version 17.
+    * `templates/template-hw18.ovf` is the template for hardware version 18.
+    * `templates/template-hw19.ovf` is the template for hardware version 19.
+    * `templates/template-hw20.ovf` is the template for hardware version 20.
 
-If you want to add more than 1 disk into the OVA, firstly convert all flat vmdk files, and add new converted vmdk files by following path_to_ovf_template.
-For example, below command creates an OVA with 3 disks
+##### Create OVF File in Directory
+
+Optionally, when the `--ovf` option is used, `mkova.sh` skips creating the OVA file and just creates a directory with the files that
+would be have been packed into the OVA. The directory will be created in the current directory with the supplied
+OVA name.
+
+##### Multiple Disks
+
+You can add multiple disks by adding them to the command line, for example:
 ```
 $ mkova.sh ova_name path_to_ovf_template disk1.vmdk disk2.vmdk disk3.vmdk
 ```
-Here mutiple disks are only supported to be attached to one SCSI controller, and at most 15 disks can be added in one OVA.
+Multiple disks are only supported to be attached to one SCSI controller, and at most 15 disks can be added in one OVA.
 
-5. After `mkova.sh` completes, you would be able to see the final OVA under `$TESTSVM_PATH` folder.
+When `mkova.sh` completes, you should see the final OVA under the current directory.
+
+##### Configuration File
+
+`mkova.sh` will look for a configuration file at `/etc/open-vmdk.conf`.
+This is a simple shell script that can be used to set default values.
+
