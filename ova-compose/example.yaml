@@ -1,0 +1,36 @@
+system:
+    name: example
+    type: vmx-17
+    os_vmw: other4xLinux64Guest
+    firmware: efi
+    secure_boot: true
+
+networks:
+    vm_network:
+        name: "VM Network"
+        description: "The VM Network network"
+
+hardware:
+    cpus: 2
+    memory: 2048
+    sata1:
+        type: sata_controller
+    scsi1:
+        type: scsi_controller
+    cdrom1:
+        type: cd_drive
+        parent: sata1
+    rootdisk:
+        type: hard_disk
+        parent: scsi1
+        disk_image: example.vmdk
+    usb1:
+        type: usb_controller
+    ethernet1:
+        type: ethernet
+        subtype: VmxNet3
+        network: vm_network
+    videocard1:
+        type: video_card
+    vmci1:
+        type: vmci
