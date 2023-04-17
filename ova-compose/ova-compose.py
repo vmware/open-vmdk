@@ -446,7 +446,7 @@ class OVFFile(object):
     def __init__(self, path):
         self.id = f"file{OVFFile.next_id}"
         OVFFile.next_id += 1
-        self.path = path
+        self.path = os.path.abspath(path)
         self.size = os.path.getsize(self.path)
 
 
@@ -491,6 +491,95 @@ class OVFDisk(object):
         })
 
 
+def to_camel_case(snake_str):
+    return ''.join(x.title() for x in snake_str.split('_'))
+
+
+class OVFProduct(object):
+
+    # snake case will be converted to camel case in XML
+    keys = ['info', 'product', 'vendor', 'version', 'full_version']
+
+    def __init__(self, **kwargs):
+        self.info = "Information about the installed software"
+        self.__dict__.update((k, v) for k, v in kwargs.items() if k in self.keys)
+
+
+    @classmethod
+    def from_dict(cls, d):
+        item = cls(**d)
+        return item
+
+
+    def xml_item(self):
+        xml_product = xml.etree.ElementTree.Element('{%s}ProductSection' % NS_OVF)
+
+        for k in self.keys:
+            if hasattr(self, k) and getattr(self, k) is not None:
+                xml_name = to_camel_case(k)
+                xml_product.append(xml_text_element('{%s}%s' % (NS_OVF, xml_name), getattr(self, k)))
+        return xml_product
+
+
+# abstract base class for OVFAnnotation and OVFEula
+class OVFTextBlock(object):
+
+    # snake case will be converted to camel case in XML
+    keys = ['info', 'text', 'file']
+    info_text = ""
+    xml_name = "TextBlock"
+    xml_text_name = "TextBlock"
+
+
+    def __init__(self, **kwargs):
+        self.info = "Information about the installed software"
+        self.__dict__.update((k, v) for k, v in kwargs.items() if k in self.keys)
+        if hasattr(self, 'file'):
+            file_name = self.file
+            with open(file_name, 'rt') as f:
+                self.text = f.read()
+                self.file = None
+
+
+    @classmethod
+    def from_dict(cls, d):
+        item = cls(**d)
+        return item
+
+
+    def _xml_element(self):
+        return xml.etree.ElementTree.Element('{%s}%s' % (NS_OVF, self.xml_name))
+
+
+    def xml_item(self):
+        item = self._xml_element()
+        for k in self.keys:
+            if hasattr(self, k):
+                if k == 'text':
+                    xml_name = self.xml_text_name
+                    item.append(xml_text_element('{%s}%s' % (NS_OVF, xml_name), getattr(self, k)))
+                elif getattr(self, k) is not None:
+                    xml_name = to_camel_case(k)
+                    item.append(xml_text_element('{%s}%s' % (NS_OVF, xml_name), getattr(self, k)))
+        return item
+
+
+class OVFAnnotation(OVFTextBlock):
+    info = "Description of the Product"
+    xml_name = "AnnotationSection"
+    xml_text_name = "Annotation"
+
+
+class OVFEula(OVFTextBlock):
+    info = "End User License Agreement"
+    xml_name = "EulaSection"
+    xml_text_name = "License"
+
+
+    def _xml_element(self):
+        return xml.etree.ElementTree.Element('{%s}%s' % (NS_OVF, self.xml_name), { '{%s}msgid' % NS_OVF: "eula"})
+
+
 class OVF(object):
 
     CONFIG_DEFAULTS = {
@@ -517,7 +606,7 @@ class OVF(object):
     }
 
 
-    def __init__(self, system, files, disks, networks, vssd_system, rasd_items):
+    def __init__(self, system, files, disks, networks, vssd_system, rasd_items, product, annotation, eula):
         self.hardware_config = OVF.CONFIG_DEFAULTS.copy()
         self.name = system['name']
         self.os_cim = system.get('os_cim', 100)
@@ -535,6 +624,9 @@ class OVF(object):
         self.networks = networks
         self.vssd_system = vssd_system
         self.rasd_items = rasd_items
+        self.product = product
+        self.annotation = annotation
+        self.eula = eula
         self.connect()
 
 
@@ -544,6 +636,8 @@ class OVF(object):
         # search for files and disks in hardware config:
         files = []
         disks = []
+        product = None
+        annotation = None
         hardware = config['hardware']
         for hw_id, hw in hardware.items():
             if isinstance(hw, dict):
@@ -564,8 +658,14 @@ class OVF(object):
 
         vssd_system = VssdSystem.from_dict(config)
         rasd_items = cls.rasd_items_from_dict(config)
+        if 'product' in config:
+            product = OVFProduct.from_dict(config['product'])
+        if 'annotation' in config:
+            annotation = OVFAnnotation.from_dict(config['annotation'])
+        if 'eula' in config:
+            eula = OVFEula.from_dict(config['eula'])
 
-        ovf = cls(config['system'], files, disks, networks, vssd_system, rasd_items)
+        ovf = cls(config['system'], files, disks, networks, vssd_system, rasd_items, product, annotation, eula)
 
         return ovf
 
@@ -656,6 +756,13 @@ class OVF(object):
 
         for key, val in sorted(self.hardware_config.items()):
             hw.append(xml_config(key, val))
+
+        if self.product:
+            virtual_system.append(self.product.xml_item())
+        if self.annotation:
+            virtual_system.append(self.annotation.xml_item())
+        if self.eula:
+            virtual_system.append(self.eula.xml_item())
 
         xml_indent(envelope)
         doc = xml.etree.ElementTree.ElementTree(envelope)
