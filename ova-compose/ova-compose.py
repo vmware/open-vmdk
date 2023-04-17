@@ -161,7 +161,7 @@ class RasdCpus(RasdItem):
 
     def __init__(self, num):
         super().__init__()
-        self.num = num
+        self.num = int(num)
 
     @classmethod
     def from_dict(cls, d):
@@ -184,7 +184,7 @@ class RasdMemory(RasdItem):
 
     def __init__(self, size):
         super().__init__()
-        self.size = size
+        self.size = int(size)
 
 
     @classmethod
@@ -835,15 +835,33 @@ def usage():
     print(f"  {sys.argv[0]} -i photon.yaml -o photon.ova")
 
 
+def yaml_param(loader, node):
+    params = loader.app_params
+    default = None
+    key = node.value
+
+    assert type(key) is str, f"param name must be a string"
+
+    if '=' in key:
+        key, default = [t.strip() for t in key.split('=')]
+        default = yaml.safe_load(default)
+    value = params.get(key, default)
+
+    assert value is not None, f"no param set for '{key}', and there is no default"
+
+    return value
+
+
 def main():
     config_file = None
     output_file = None
     output_format = None
     basename = None
     do_quiet = False
+    params = {}
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:], 'hi:o:q', longopts=['format=', 'input-file=', 'output-file='])
+        opts, args = getopt.getopt(sys.argv[1:], 'hi:o:q', longopts=['format=', 'input-file=', 'output-file=', 'param='])
     except:
         print ("invalid option")
         sys.exit(2)
@@ -855,6 +873,9 @@ def main():
             output_file = a
         elif o in ['-f', '--format']:
             output_format = a
+        elif o in ['--param']:
+            k,v = a.split('=')
+            params[k] = yaml.safe_load(v)
         elif o in ['-q']:
             do_quiet = True
         elif o in ['-h']:
@@ -869,7 +890,11 @@ def main():
     if config_file != None:
         f = open(config_file, 'r')
 
-    config = yaml.load(f, Loader=yaml.Loader)
+    yaml_loader = yaml.SafeLoader
+    yaml_loader.app_params = params
+    yaml.add_constructor("!param", yaml_param, Loader=yaml_loader)
+
+    config = yaml.load(f, Loader=yaml_loader)
     if f != sys.stdin:
         f.close()
 
