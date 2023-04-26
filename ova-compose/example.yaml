@@ -20,6 +20,8 @@ hardware:
     cdrom1:
         type: cd_drive
         parent: sata1
+    floppy1:
+        type: floppy
     rootdisk:
         type: hard_disk
         parent: scsi1

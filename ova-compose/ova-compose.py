@@ -291,10 +291,14 @@ class RasdControllerItem(RasdItem):
 class RasdCdDrive(RasdControllerItem):
     resource_type = 15
     description = "CD Drive"
+    DEFAULT_CONFIG = {
+        "connectable.allowGuestControl":"true"
+    }
 
     def __init__(self, parent_id, image):
         super().__init__(parent_id)
         self.image = image
+        self.config = RasdFloppy.DEFAULT_CONFIG.copy()
 
 
     @classmethod
@@ -305,9 +309,13 @@ class RasdCdDrive(RasdControllerItem):
 
     def xml_item(self, required, element_name):
         item = super().xml_item(required, element_name)
+        item.append(self.xml_element('AutomaticAllocation', "false"))
         item.append(self.xml_element('ResourceSubType', 'vmware.cdrom.remotepassthrough'))
         if self.image is not None:
             item.append(self.xml_element('HostResource', self.image.host_resource()))
+        # maybe move to parent class:
+        for key, val in sorted(self.config.items()):
+            item.append(xml_config(key, val))
 
         return item
 
@@ -335,6 +343,38 @@ class RasdVmci(RasdItem):
         return item
 
 
+class RasdFloppy(RasdItem):
+    resource_type = 14
+    description = "Floppy Drive"
+    DEFAULT_CONFIG = {
+        "connectable.allowGuestControl":"true"
+    }
+
+
+    def __init__(self, image):
+        super().__init__()
+        self.image = image
+        self.config = RasdFloppy.DEFAULT_CONFIG.copy()
+
+
+    @classmethod
+    def from_dict(cls, d):
+        item = cls(d.get('image', None))
+        return item
+
+
+    def xml_item(self, required, element_name):
+        item = super().xml_item(required, element_name)
+        item.append(self.xml_element('AutomaticAllocation', "false"))
+        if self.image is not None:
+            item.append(self.xml_element('HostResource', self.image.host_resource()))
+        # maybe move to parent class:
+        for key, val in sorted(self.config.items()):
+            item.append(xml_config(key, val))
+
+        return item
+
+
 class RasdVideoCard(RasdItem):
     resource_type = 24
     description = "Video Card"
@@ -353,6 +393,7 @@ class RasdVideoCard(RasdItem):
 
     def xml_item(self, required, element_name):
         item = super().xml_item(required, element_name)
+        item.append(self.xml_element('AutomaticAllocation', "false"))
         # maybe move to parent class:
         for key, val in sorted(self.config.items()):
             item.append(xml_config(key, val))
@@ -409,6 +450,7 @@ class RasdEthernet(RasdItem):
 
     def xml_item(self, required, element_name):
         item = super().xml_item(required, element_name)
+        item.append(self.xml_element('AutomaticAllocation', "false"))
         item.append(self.xml_element('ResourceSubType', self.subtype))
         item.append(self.xml_element('Connection', self.network.name))
         # maybe move to parent class:
