@@ -30,10 +30,10 @@ char *toolsVersion = "2147483647";
 
 static int
 copyData(DiskInfo *dst,
-         off_t dstOffset,
-         DiskInfo *src,
-         off_t srcOffset,
-         uint64_t length)
+		 off_t dstOffset,
+		 DiskInfo *src,
+		 off_t srcOffset,
+		 uint64_t length)
 {
 	char buf[65536];
 
@@ -60,18 +60,11 @@ copyData(DiskInfo *dst,
 }
 
 static bool
-copyDisk(DiskInfo *src, const char *fileName)
+copyDisk(DiskInfo *src, DiskInfo *dst)
 {
-	off_t capacity;
-	DiskInfo *dst;
 	off_t end;
 	off_t pos;
 
-	capacity = src->vmt->getCapacity(src);
-	dst = StreamOptimized_Create(fileName, capacity);
-	if (!dst) {
-		return false;
-	}
 	end = 0;
 	while (src->vmt->nextData(src, &pos, &end) == 0) {
 		if (copyData(dst, pos, src, pos, end - pos)) {
@@ -177,20 +170,33 @@ main(int argc,
 				usedSpace += end - pos;
 			}
 			printf("{ \"capacity\": %llu, \"used\": %llu }\n",
-			       (unsigned long long)capacity, (unsigned long long)usedSpace);
+					(unsigned long long)capacity, (unsigned long long)usedSpace);
 		} else {
-			const char *tgt;
+			const char *filename;
+			DiskInfo *tgt;
+			off_t capacity;
 
 			if (optind >= argc) {
-				tgt = "dst.vmdk";
+				filename = "dst.vmdk";
 			} else {
-				tgt = argv[optind++];
+				filename = argv[optind++];
 			}
-			printf("Starting to convert %s to %s...\n", src, tgt);
-			if (copyDisk(di, tgt)) {
-				printf("Success\n");
+			capacity = di->vmt->getCapacity(di);
+
+			if (strcmp(&(filename[strlen(filename) - 5]), ".vmdk") == 0)
+				tgt = StreamOptimized_Create(filename, capacity);
+			else
+				tgt = Flat_Create(filename, capacity);
+
+			if (tgt == NULL) {
+				fprintf(stderr, "Cannot open target disk %s: %s\n", filename, strerror(errno));
 			} else {
-				fprintf(stderr, "Failure!\n");
+				printf("Starting to convert %s to %s...\n", src, filename);
+				if (copyDisk(di, tgt)) {
+					printf("Success\n");
+				} else {
+					fprintf(stderr, "Failure!\n");
+				}
 			}
 		}
 		di->vmt->close(di);
