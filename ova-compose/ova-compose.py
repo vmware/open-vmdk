@@ -427,7 +427,7 @@ class RasdEthernet(RasdItem):
     resource_type = 10
     description = "Ethernet Adapter"
     DEFAULT_CONFIG = {
-        "wakeOnLanEnabled":"true",
+        "wakeOnLanEnabled":"false",
         "connectable.allowGuestControl":"true"
     }
 
@@ -450,7 +450,7 @@ class RasdEthernet(RasdItem):
 
     def xml_item(self, required, element_name):
         item = super().xml_item(required, element_name)
-        item.append(self.xml_element('AutomaticAllocation', "false"))
+        item.append(self.xml_element('AutomaticAllocation', "true"))
         item.append(self.xml_element('ResourceSubType', self.subtype))
         item.append(self.xml_element('Connection', self.network.name))
         # maybe move to parent class:
@@ -680,6 +680,8 @@ class OVF(object):
         disks = []
         product = None
         annotation = None
+        eula = None
+
         hardware = config['hardware']
         for hw_id, hw in hardware.items():
             if isinstance(hw, dict):
