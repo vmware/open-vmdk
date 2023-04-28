@@ -22,6 +22,8 @@ hardware:
         parent: sata1
     floppy1:
         type: floppy
+        image: floppy.img
+        connected: true
     rootdisk:
         type: hard_disk
         parent: scsi1

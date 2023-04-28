@@ -105,6 +105,8 @@ class VssdSystem(VirtualHardware):
 class RasdItem(VirtualHardware):
     last_instance_id = 0
     description = "Virtual Hardware Item"
+    config = {}
+    connectable = False
 
     def __init__(self, subtype=None):
         RasdItem.last_instance_id += 1
@@ -150,6 +152,12 @@ class RasdItem(VirtualHardware):
         item.append(self.xml_element('InstanceID', self.instance_id))
         item.append(self.xml_element('Description', self.description))
         item.append(self.xml_element('ElementName', element_name))
+
+        for key, val in sorted(self.config.items()):
+            item.append(xml_config(key, val))
+
+        if self.connectable:
+            item.append(self.xml_element('AutomaticAllocation', "true" if self.connected else "false"))
 
         return item
 
@@ -249,6 +257,7 @@ class RasdSataController(RasdController):
     resource_type = 20
     description = "SATA Controller"
 
+
     def xml_item(self, required, element_name):
         item = super().xml_item(required, element_name)
         item.append(self.xml_element('ResourceSubType', 'vmware.sata.ahci'))
@@ -262,6 +271,7 @@ class RasdIdeController(RasdController):
 
 
 class RasdControllerItem(RasdItem):
+
 
     def __init__(self, parent_id):
         super().__init__()
@@ -294,28 +304,27 @@ class RasdCdDrive(RasdControllerItem):
     DEFAULT_CONFIG = {
         "connectable.allowGuestControl":"true"
     }
+    connectable = True
 
-    def __init__(self, parent_id, image):
+
+    def __init__(self, parent_id, image, connected=False):
         super().__init__(parent_id)
         self.image = image
-        self.config = RasdFloppy.DEFAULT_CONFIG.copy()
+        self.config = self.DEFAULT_CONFIG.copy()
+        self.connected = connected
 
 
     @classmethod
     def from_dict(cls, d):
-        item = cls(d['parent'], d.get('image', None))
+        item = cls(d['parent'], d.get('image', None), d.get('connected', False))
         return item
 
 
     def xml_item(self, required, element_name):
         item = super().xml_item(required, element_name)
-        item.append(self.xml_element('AutomaticAllocation', "false"))
         item.append(self.xml_element('ResourceSubType', 'vmware.cdrom.remotepassthrough'))
         if self.image is not None:
             item.append(self.xml_element('HostResource', self.image.host_resource()))
-        # maybe move to parent class:
-        for key, val in sorted(self.config.items()):
-            item.append(xml_config(key, val))
 
         return item
 
@@ -349,28 +358,26 @@ class RasdFloppy(RasdItem):
     DEFAULT_CONFIG = {
         "connectable.allowGuestControl":"true"
     }
+    connectable = True
 
 
-    def __init__(self, image):
+    def __init__(self, image, connected=False):
         super().__init__()
         self.image = image
-        self.config = RasdFloppy.DEFAULT_CONFIG.copy()
+        self.config = self.DEFAULT_CONFIG.copy()
+        self.connected = connected
 
 
     @classmethod
     def from_dict(cls, d):
-        item = cls(d.get('image', None))
+        item = cls(d.get('image', None), d.get('connected', False))
         return item
 
 
     def xml_item(self, required, element_name):
         item = super().xml_item(required, element_name)
-        item.append(self.xml_element('AutomaticAllocation', "false"))
         if self.image is not None:
             item.append(self.xml_element('HostResource', self.image.host_resource()))
-        # maybe move to parent class:
-        for key, val in sorted(self.config.items()):
-            item.append(xml_config(key, val))
 
         return item
 
@@ -384,6 +391,8 @@ class RasdVideoCard(RasdItem):
         "enable3DSupport" : "false",
         "use3dRenderer" : "automatic"
     }
+    connectable = True
+    connected = False
 
 
     def __init__(self):
@@ -393,10 +402,7 @@ class RasdVideoCard(RasdItem):
 
     def xml_item(self, required, element_name):
         item = super().xml_item(required, element_name)
-        item.append(self.xml_element('AutomaticAllocation', "false"))
-        # maybe move to parent class:
-        for key, val in sorted(self.config.items()):
-            item.append(xml_config(key, val))
+
         return item
 
 
@@ -430,17 +436,20 @@ class RasdEthernet(RasdItem):
         "wakeOnLanEnabled":"false",
         "connectable.allowGuestControl":"true"
     }
+    connectable = True
 
-    def __init__(self, network_id, subtype):
+
+    def __init__(self, network_id, subtype, connected=True):
         super().__init__()
         self.config = RasdEthernet.DEFAULT_CONFIG.copy()
         self.network_id = network_id
         self.subtype = subtype
+        self.connected = connected
 
 
     @classmethod
     def from_dict(cls, d):
-        item = cls(d['network'], d['subtype'])
+        item = cls(d['network'], d['subtype'], d.get('connected', True))
         return item
 
 
@@ -450,12 +459,8 @@ class RasdEthernet(RasdItem):
 
     def xml_item(self, required, element_name):
         item = super().xml_item(required, element_name)
-        item.append(self.xml_element('AutomaticAllocation', "true"))
         item.append(self.xml_element('ResourceSubType', self.subtype))
         item.append(self.xml_element('Connection', self.network.name))
-        # maybe move to parent class:
-        for key, val in sorted(self.config.items()):
-            item.append(xml_config(key, val))
         
         return item
 
@@ -482,8 +487,8 @@ class OVFNetwork(object):
 
 
 class OVFFile(object):
-
     next_id = 0
+
 
     def __init__(self, path):
         self.id = f"file{OVFFile.next_id}"
@@ -505,8 +510,8 @@ class OVFFile(object):
 
 
 class OVFDisk(object):
-
     next_id = 0
+
 
     def __init__(self, path):
         self.id = f"vmdisk{OVFFile.next_id}"
@@ -538,7 +543,6 @@ def to_camel_case(snake_str):
 
 
 class OVFProduct(object):
-
     # snake case will be converted to camel case in XML
     keys = ['info', 'product', 'vendor', 'version', 'full_version']
 
@@ -565,7 +569,6 @@ class OVFProduct(object):
 
 # abstract base class for OVFAnnotation and OVFEula
 class OVFTextBlock(object):
-
     # snake case will be converted to camel case in XML
     keys = ['info', 'text', 'file']
     info_text = ""
@@ -685,8 +688,8 @@ class OVF(object):
         hardware = config['hardware']
         for hw_id, hw in hardware.items():
             if isinstance(hw, dict):
-                if 'iso_image' in hw:
-                    file = OVFFile(hw['iso_image'])
+                if 'image' in hw:
+                    file = OVFFile(hw['image'])
                     files.append(file)
                     hw['image'] = file
                 elif 'disk_image' in hw:
