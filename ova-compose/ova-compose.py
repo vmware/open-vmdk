@@ -20,7 +20,7 @@ import getopt
 import datetime
 import yaml
 import json
-import xml.etree.ElementTree
+from lxml import etree as ET
 import hashlib
 import tempfile
 import shutil
@@ -34,6 +34,15 @@ NS_RASD = "http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_ResourceAllocat
 NS_VMW = "http://www.vmware.com/schema/ovf"
 NS_VSSD = "http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_VirtualSystemSettingData"
 NS_XSI = "http://www.w3.org/2001/XMLSchema-instance"
+
+NS_MAP = {
+    "cim" : NS_CIM,
+    "ovf" : NS_OVF,
+    "rasd" : NS_RASD,
+    "vmw" : NS_VMW,
+    "vssd" : NS_VSSD,
+    "xsi" : NS_XSI
+}
 
 
 def xml_indent(elem, level=0):
@@ -50,13 +59,13 @@ def xml_indent(elem, level=0):
 
 
 def xml_text_element(tag, value):
-    elem = xml.etree.ElementTree.Element(tag)
+    elem = ET.Element(tag)
     elem.text = value
     return elem
 
 
 def xml_config(key, val):
-    return xml.etree.ElementTree.Element('{%s}Config' % NS_VMW, { '{%s}required' % NS_OVF: 'false', '{%s}key' % NS_VMW: key, '{%s}value' % NS_VMW: val})
+    return ET.Element('{%s}Config' % NS_VMW, { '{%s}required' % NS_OVF: 'false', '{%s}key' % NS_VMW: key, '{%s}value' % NS_VMW: val})
 
 
 class ValidationError(Exception):
@@ -81,7 +90,7 @@ class VssdSystem(VirtualHardware):
 
 
     def new_text_element(self, tag, value):
-        elem = xml.etree.ElementTree.Element(tag)
+        elem = ET.Element(tag)
         elem.text = value
         return elem
 
@@ -92,7 +101,7 @@ class VssdSystem(VirtualHardware):
 
     def xml_item(self, element_name):
         attrs = {}
-        item = xml.etree.ElementTree.Element('{%s}System' % NS_OVF, attrs)
+        item = ET.Element('{%s}System' % NS_OVF, attrs)
         
         item.append(self.xml_element('ElementName', element_name))
         item.append(self.xml_element('InstanceID', 0))
@@ -131,7 +140,7 @@ class RasdItem(VirtualHardware):
 
 
     def new_text_element(self, tag, value):
-        elem = xml.etree.ElementTree.Element(tag)
+        elem = ET.Element(tag)
         elem.text = value
         return elem
 
@@ -146,7 +155,7 @@ class RasdItem(VirtualHardware):
         if not required:
             attrs["{%s}required" % NS_OVF] = 'false'
 
-        item = xml.etree.ElementTree.Element('{%s}Item' % NS_OVF, attrs)
+        item = ET.Element('{%s}Item' % NS_OVF, attrs)
         
         item.append(self.xml_element('ResourceType', self.resource_type))
         item.append(self.xml_element('InstanceID', self.instance_id))
@@ -478,8 +487,8 @@ class OVFNetwork(object):
 
 
     def xml_item(self):
-        item = xml.etree.ElementTree.Element('{%s}Network' % NS_OVF, {'{%s}name' % NS_OVF : self.name})
-        item_desc = xml.etree.ElementTree.Element('{%s}Description' % NS_OVF)
+        item = ET.Element('{%s}Network' % NS_OVF, {'{%s}name' % NS_OVF : self.name})
+        item_desc = ET.Element('{%s}Description' % NS_OVF)
         item_desc.text = f"The {self.name} Network"
         item.append(item_desc)
         
@@ -502,7 +511,7 @@ class OVFFile(object):
 
 
     def xml_item(self):
-        return xml.etree.ElementTree.Element('{%s}File' % NS_OVF, {
+        return ET.Element('{%s}File' % NS_OVF, {
             '{%s}href' % NS_OVF: os.path.basename(self.path),
             '{%s}id' % NS_OVF: self.id,
             '{%s}size' % NS_OVF: str(self.size)
@@ -528,7 +537,7 @@ class OVFDisk(object):
 
 
     def xml_item(self):
-        return xml.etree.ElementTree.Element('{%s}Disk' % NS_OVF, {
+        return ET.Element('{%s}Disk' % NS_OVF, {
             '{%s}capacity' % NS_OVF: str(self.capacity),
             '{%s}capacityAllocationUnits' % NS_OVF: 'byte',
             '{%s}diskId' % NS_OVF: self.id,
@@ -558,7 +567,7 @@ class OVFProduct(object):
 
 
     def xml_item(self):
-        xml_product = xml.etree.ElementTree.Element('{%s}ProductSection' % NS_OVF)
+        xml_product = ET.Element('{%s}ProductSection' % NS_OVF)
 
         for k in self.keys:
             if hasattr(self, k) and getattr(self, k) is not None:
@@ -593,7 +602,7 @@ class OVFTextBlock(object):
 
 
     def _xml_element(self):
-        return xml.etree.ElementTree.Element('{%s}%s' % (NS_OVF, self.xml_name))
+        return ET.Element('{%s}%s' % (NS_OVF, self.xml_name))
 
 
     def xml_item(self):
@@ -622,7 +631,7 @@ class OVFEula(OVFTextBlock):
 
 
     def _xml_element(self):
-        return xml.etree.ElementTree.Element('{%s}%s' % (NS_OVF, self.xml_name), { '{%s}msgid' % NS_OVF: "eula"})
+        return ET.Element('{%s}%s' % (NS_OVF, self.xml_name), { '{%s}msgid' % NS_OVF: "eula"})
 
 
 class OVF(object):
@@ -750,23 +759,16 @@ class OVF(object):
 
 
     def to_xml(self):
-        xml.etree.ElementTree.register_namespace("cim", NS_CIM)
-        xml.etree.ElementTree.register_namespace("ovf", NS_OVF)
-        xml.etree.ElementTree.register_namespace("rasd", NS_RASD)
-        xml.etree.ElementTree.register_namespace("vmw", NS_VMW)
-        xml.etree.ElementTree.register_namespace("vssd", NS_VSSD)
-        xml.etree.ElementTree.register_namespace("xsi", NS_XSI)
-
-        envelope = xml.etree.ElementTree.Element('{%s}Envelope' % NS_OVF)
+        envelope = ET.Element('{%s}Envelope' % NS_OVF, nsmap=NS_MAP)
 
         # References (files)
-        references = xml.etree.ElementTree.Element('{%s}References' % NS_OVF)
+        references = ET.Element('{%s}References' % NS_OVF)
         for file in self.files:
             references.append(file.xml_item())
         envelope.append(references)
 
         # DiskSection
-        disk_section = xml.etree.ElementTree.Element('{%s}DiskSection' % NS_OVF)
+        disk_section = ET.Element('{%s}DiskSection' % NS_OVF)
         disk_section.append(xml_text_element('{%s}Info' % NS_OVF, "Virtual disk information"))
 
         for disk in self.disks:
@@ -774,23 +776,23 @@ class OVF(object):
         envelope.append(disk_section)
 
         # NetworkSection
-        network_section = xml.etree.ElementTree.Element('{%s}NetworkSection' % NS_OVF)
+        network_section = ET.Element('{%s}NetworkSection' % NS_OVF)
         network_section.append(xml_text_element('{%s}Info' % NS_OVF, "Virtual Networks"))
         for nw_id, nw in self.networks.items():
             network_section.append(nw.xml_item())        
         envelope.append(network_section)
 
         # VirtualSystem
-        virtual_system = xml.etree.ElementTree.Element('{%s}VirtualSystem' % NS_OVF, { '{%s}id' % NS_OVF: 'vm' })
+        virtual_system = ET.Element('{%s}VirtualSystem' % NS_OVF, { '{%s}id' % NS_OVF: 'vm' })
         virtual_system.append(xml_text_element('{%s}Info' % NS_OVF, "Virtual System"))
         envelope.append(virtual_system)
 
         virtual_system.append(xml_text_element('{%s}Name' % NS_OVF, self.vssd_system.identifier))
-        oss = xml.etree.ElementTree.Element('{%s}OperatingSystemSection' % NS_OVF, { '{%s}id' % NS_OVF: str(self.os_cim), '{%s}osType' % NS_VMW: self.os_vmw })
+        oss = ET.Element('{%s}OperatingSystemSection' % NS_OVF, { '{%s}id' % NS_OVF: str(self.os_cim), '{%s}osType' % NS_VMW: self.os_vmw })
         oss.append(xml_text_element('{%s}Info' % NS_OVF, "Operating System"))
         virtual_system.append(oss)
 
-        hw = xml.etree.ElementTree.Element('{%s}VirtualHardwareSection' % NS_OVF)
+        hw = ET.Element('{%s}VirtualHardwareSection' % NS_OVF)
         hw.append(xml_text_element('{%s}Info' % NS_OVF, "Virtual Hardware"))
         virtual_system.append(hw)
 
@@ -812,7 +814,8 @@ class OVF(object):
             virtual_system.append(self.eula.xml_item())
 
         xml_indent(envelope)
-        doc = xml.etree.ElementTree.ElementTree(envelope)
+        doc = ET.ElementTree(envelope)
+        ET.cleanup_namespaces(doc)
         return doc
 
 
@@ -820,8 +823,8 @@ class OVF(object):
         if ovf_file == None:
             ovf_file = f"{self.name}.ovf"
         doc = self.to_xml()
-        with open(ovf_file, "wt") as f:
-            doc.write(f, "unicode", True, "http://schemas.dmtf.org/ovf/envelope/1", "xml")
+        with open(ovf_file, "wb") as f:
+            doc.write(f, pretty_print=True, exclusive=True, xml_declaration=True, encoding="UTF-8")
 
         # if you know an easier way to produce a time stamp with the local tz, please fix:
         timestamp = datetime.datetime.now(
