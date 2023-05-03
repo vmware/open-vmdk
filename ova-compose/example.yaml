@@ -1,0 +1,50 @@
+system:
+    name: example
+    type: vmx-17
+    os_vmw: !param os=other4xLinux64Guest
+    firmware: !param firmware=efi
+    secure_boot: !param secure-boot=true
+
+networks:
+    vm_network:
+        name: "VM Network"
+        description: "The VM Network network"
+
+hardware:
+    cpus: !param cpus=2
+    memory: !param memory=2048
+    sata1:
+        type: sata_controller
+    scsi1:
+        type: scsi_controller
+    cdrom1:
+        type: cd_drive
+        parent: sata1
+    floppy1:
+        type: floppy
+        image: floppy.img
+        connected: true
+    rootdisk:
+        type: hard_disk
+        parent: scsi1
+        disk_image: !param rootdisk
+    usb1:
+        type: usb_controller
+    ethernet1:
+        type: ethernet
+        subtype: VmxNet3
+        network: vm_network
+    videocard1:
+        type: video_card
+    vmci1:
+        type: vmci
+
+product:
+    product: An Example VM
+    vendor: A Company Inc.
+
+annotation:
+    text: the password is top secret
+
+eula:
+    file: !param eulafile
