@@ -43,7 +43,7 @@ $ make DESTDIR=/tmp/open-vmdk install
 * `vmdk-convert` to convert raw disk image files to `vmdk` format (and back)
 * `ova-compose` to create an OVA (or OVF) file from a `vmdk` and a configuration file describing a VM
 
-There is also a legacy tool `mkova.sh` that uses OVF templates. This is less flecxible than `ova-compose` and will be deprecated.
+There is also a legacy tool `mkova.sh` that uses OVF templates. This is less flexible than `ova-compose` and will be deprecated.
 
 ### New VM
 
