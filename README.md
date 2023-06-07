@@ -1,4 +1,4 @@
-# Open VMDK
+# Introdoction
 
 Open VMDK is an assistant tool for creating [Open Virtual Appliance (OVA)](https://en.wikipedia.org/wiki/Virtual_appliance). An OVA is a tar archive file with [Open Virtualization Format (OVF)](https://en.wikipedia.org/wiki/Open_Virtualization_Format) files inside, which is composed of an OVF descriptor with extension .ovf, a virtual machine disk image file with extension .vmdk, and a manifest file with extension .mf.
 
@@ -8,9 +8,9 @@ The VMDK format specification can be downloaded at https://www.vmware.com/app/vm
 
 The OVF/OVA specification can be found at https://www.dmtf.org/standards/ovf
 
-## Getting Started
+# Getting Started
 
-### Installation
+## Installation
 Clone the repository, like `git clone https://github.com/vmware/open-vmdk`.
 
 Alternatively, download and extract it:
@@ -37,9 +37,9 @@ You can change the prefix with `PREXIX` (default is `usr`) or the installation d
 $ make DESTDIR=/tmp/open-vmdk install
 ```
 
-### Usage
+## Usage
 
-#### Existing VM
+### Existing VM
 
 Below example shows how to create an [Open Virtual Appliance (OVA)](https://en.wikipedia.org/wiki/Virtual_appliance) from vSphere virtual machine. Presume the virtual machine's name is `testvm`, and virtual machine files include:
 ```
@@ -63,7 +63,7 @@ Or, you can specify the new vmdk file name by running
 $ vmdk-convert testvm-flat.vmdk disk1.vmdk
 ```
 
-#### New VM
+### New VM
 
 `vmdk-convert` can process raw disk images to streamable `vmdk` images. For example (as root):
 ```
@@ -74,7 +74,7 @@ losetup -d $LOOP_DEVICE
 vmdk-convert testvm.img testvm.vmdk
 ```
 
-#### Set the VMware Tools version
+### Set the VMware Tools version
 
 Set the VMware Tools version installed in your VM disk by adding the `-t` option.
 The tools version is a number calculated from the version string `x.y.z` using the formulae `1024*x + 32*y + z`.
@@ -86,9 +86,9 @@ This will set `ddb.toolsVersion` to 12325 in the metadata of disk1.vmdk. By defa
 See https://packages.vmware.com/tools/versions for all released VMware Tools versions.
 See https://kb.vmware.com/s/article/83068 for instructions to add `ddb.toolsVersion` to an exiting OVF/OVA template.
 
-#### Create an OVA
+### Create an OVA
 
-##### Hardware Options
+#### Hardware Options
 
 By default, the OVA will be created with 2 CPUs and 1024 MB memory. For VMs with hardware version 11 or later, the default OVA firmware is `efi`.
 These defaults can be changed with options to `mkova.sh`:
@@ -102,7 +102,7 @@ for example in the configuration file (see below).
 
 For hardware versions 7 and 10 only `bios` is supported as firmware.
 
-##### Selecting the Template
+#### Selecting the Template
 
 The template is an OVF file with place holders and provides settings for a pre-configured VM.
 It will be used to create the final OVF.
@@ -138,13 +138,13 @@ Where,
     * `templates/template-hw19.ovf` is the template for hardware version 19.
     * `templates/template-hw20.ovf` is the template for hardware version 20.
 
-##### Create OVF File in Directory
+#### Create OVF File in Directory
 
 Optionally, when the `--ovf` option is used, `mkova.sh` skips creating the OVA file and just creates a directory with the files that
 would be have been packed into the OVA. The directory will be created in the current directory with the supplied
 OVA name.
 
-##### Multiple Disks
+#### Multiple Disks
 
 You can add multiple disks by adding them to the command line, for example:
 ```
@@ -154,7 +154,7 @@ Multiple disks are only supported to be attached to one SCSI controller, and at 
 
 When `mkova.sh` completes, you should see the final OVA under the current directory.
 
-##### Configuration File
+#### Configuration File
 
 `mkova.sh` will look for a configuration file at `/etc/open-vmdk.conf`.
 This is a simple shell script that can be used to set default values.
