@@ -1,4 +1,4 @@
-# Introdoction
+# Introduction
 
 Open VMDK is an assistant tool for creating [Open Virtual Appliance (OVA)](https://en.wikipedia.org/wiki/Virtual_appliance). An OVA is a tar archive file with [Open Virtualization Format (OVF)](https://en.wikipedia.org/wiki/Open_Virtualization_Format) files inside, which is composed of an OVF descriptor with extension .ovf, a virtual machine disk image file with extension .vmdk, and a manifest file with extension .mf.
 
@@ -39,29 +39,11 @@ $ make DESTDIR=/tmp/open-vmdk install
 
 ## Usage
 
-### Existing VM
+`open-vmdk` basically has two parts:
+* `vmdk-convert` to convert raw disk image files to `vmdk` format (and back)
+* `ova-compose` to create an OVA (or OVF) file from a `vmdk` and a configuration file describing a VM
 
-Below example shows how to create an [Open Virtual Appliance (OVA)](https://en.wikipedia.org/wiki/Virtual_appliance) from vSphere virtual machine. Presume the virtual machine's name is `testvm`, and virtual machine files include:
-```
-testvm-312d29db.hlog
-testvm-flat.vmdk
-testvm.nvram
-testvm.vmdk
-testvm.vmsd
-testvm.vmx
-vmware.log
-```
-1. Copy `testvm` folder to `TESTSVM_PATH` on the machine where you have `open-vmdk` installed.
-2. Convert vmfs raw data extent file of the VM to OVF streaming format.
-```
-$ cd $TESTSVM_PATH
-$ vmdk-convert testvm-flat.vmdk
-```
-After converting, a new vmdk file `dst.vmdk` will be created under `$TESTSVM_PATH` folder.
-Or, you can specify the new vmdk file name by running
-```
-$ vmdk-convert testvm-flat.vmdk disk1.vmdk
-```
+There is also a legacy tool `mkova.sh` that uses OVF templates. This is less flecxible than `ova-compose` and will be deprecated.
 
 ### New VM
 
@@ -86,7 +68,145 @@ This will set `ddb.toolsVersion` to 12325 in the metadata of disk1.vmdk. By defa
 See https://packages.vmware.com/tools/versions for all released VMware Tools versions.
 See https://kb.vmware.com/s/article/83068 for instructions to add `ddb.toolsVersion` to an exiting OVF/OVA template.
 
-### Create an OVA
+### Existing VM
+
+Below example shows how to create an [Open Virtual Appliance (OVA)](https://en.wikipedia.org/wiki/Virtual_appliance) from vSphere virtual machine. Presume the virtual machine's name is `testvm`, and virtual machine files include:
+```
+testvm-312d29db.hlog
+testvm-flat.vmdk
+testvm.nvram
+testvm.vmdk
+testvm.vmsd
+testvm.vmx
+vmware.log
+```
+1. Copy `testvm` folder to `TESTSVM_PATH` on the machine where you have `open-vmdk` installed.
+2. Convert vmfs raw data extent file of the VM to OVF streaming format.
+```
+$ cd $TESTSVM_PATH
+$ vmdk-convert testvm-flat.vmdk
+```
+After converting, a new vmdk file `dst.vmdk` will be created under `$TESTSVM_PATH` folder.
+Or, you can specify the new vmdk file name by running
+```
+$ vmdk-convert testvm-flat.vmdk disk1.vmdk
+```
+
+### Create an OVA with ova-compose
+
+#### Config File
+```
+system:
+    name: example
+    type: vmx-17
+    os_vmw: other4xLinux64Guest
+    firmware: efi
+    secure_boot: true
+
+networks:
+    vm_network:
+        name: "VM Network"
+        description: "The VM Network network"
+
+hardware:
+    cpus: 2
+    memory: 2048
+    sata1:
+        type: sata_controller
+    scsi1:
+        type: scsi_controller
+    cdrom1:
+        type: cd_drive
+        parent: sata1
+    rootdisk:
+        type: hard_disk
+        parent: scsi1
+        disk_image: example.vmdk
+    usb1:
+        type: usb_controller
+    ethernet1:
+        type: ethernet
+        subtype: VmxNet3
+        network: vm_network
+    videocard1:
+        type: video_card
+    vmci1:
+        type: vmci
+
+product:
+    product: An Example VM
+    vendor: A Company Inc.
+
+annotation:
+    text: the password is top secret
+
+eula:
+    file: eula.txt
+```
+
+The config file has 3 mandatory and 3 optional sections. `system`, `networks` and `hardware` are mandatory.
+* `system` describes basic properties of the whole system, like name, hardware compatibility version and others.
+* `networks` describes the network used. Each entry is a unique id. Each of these entries needs a `name` and a `description`.
+* `hardware` describes the hardware components. Every entry is a unique id that can be any name, except the reserved ids `cpus` and `memory`. Each components except `cpus` and `memory` must have a `type`. The type can be one of the values described below.
+  The reserved ids:
+  * `cpus`: set to the number of CPUs
+  * `memory`: set to the memory size in megabytes
+
+  The other ids can have these types:
+  *  `scsi_controller`, `sata_controller` or `ide_controller`: a controller. Each controller can have 0 or more other devices attached.
+  * `scsi_controller` can have a `subtype` set to one of `VirtualSCSI` (aka "pvscsi") or `lsilogic`.
+  * `cd_drive`: a CD drive, optionally with an ISO image set with `image`. The file will be packed within the OVA. The controller to attach to must be set with `parent` to the id of the controller. Set `connected = true` to have the image connected on startup (default is `false`)
+  * `floppy`: a floppy device. Very similar to `cd_drive`, but does not need to be connected to a controller.
+  * `hard_disk`: a hard disk. This must be set to an image in streamable vmdk format with `disk_image`. The file will be packed within the OVA.
+  * `ethernet`: an ethernet device. The network must be set with `network` to one of the networks defined in the main `networks` section. Set `connected = false` to have the device disconnected on startup (default is `true`)
+  * `usb_controller`, `video_card` and `vmci`: USB controller, video card and VMCI device. 
+
+These 3 sections are optional:
+* `product` describes the product. It has the fields `info`, `product`, `vendor`, `version` and `full_version`.
+* `annotation` has the fields `info`, `text` and `file`. `text` and `file` are mutually exclusive - `text` is text inline, `file` can be set to a text file that will be filled in. The annotation text will appear for example as a comment in VMware Fusion.
+* `eula` also has the fields `info`, `text` and `file`. It contains the EULA agreement the user has to agree to when deploying the VM.
+
+#### Parameters
+
+Values can be filled in with parameters from the command line. This makes the yaml file reusable for different VMs. For example, the hard disk can be set via command line:
+```
+    rootdisk:
+        type: hard_disk
+        parent: scsi1
+        disk_image: !param rootdisk
+```
+When invoking `ova-compose` (see below) the value can be set with `--param rootdisk=example.vmdk`.
+
+Default values can also be set in case `ova-compose` is invoked without the parameter. Example:
+```
+hardware:
+    cpus: !param cpus=2
+    memory: !param memory=2048
+```
+In this case, setting the parameters `cpus` and `memory` will be optional.
+
+If `ova-compose` is invoked without setting a parameter for which no default is set, it will throw an error.
+
+#### Usage
+
+`ova-compose -i|--input_file <input_file> -o|--output_file <output_file> [ --format <format> ] [[--param <key=value>] ...] [-q]`
+Options:
+* `-i|--input_file <input_file>` : the config file to use
+* `-o|--output_file <output_file>`: the output file or directory
+* `--format <format>` : the format, one of: `ova`, `ovf` or `dir`. If not set, the format will be guessed from the output file extension if it is `ova` or `ovf`
+  * `ova` to create an OVA file
+  * `ovf` to create just the OVF file
+  * `dir` to create a directory containing the OVF file, the manifest and the files used for the cdrom and harddisk devices.
+* `--param <key=value>`: set parameter `<key>` to `<value>`.
+ 
+Example:
+```
+$ ova-compose.py -i minimal.yaml -o minimal.ova
+creating 'minimal.ova' with format 'ova' from 'minimal.yaml'
+done.
+```
+
+### Create an OVA - Legacy (mkova.sh)
 
 #### Hardware Options
 
