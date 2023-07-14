@@ -157,7 +157,7 @@ The config file has 3 mandatory and 3 optional sections. `system`, `networks` an
   * `scsi_controller` can have a `subtype` set to one of `VirtualSCSI` (aka "pvscsi") or `lsilogic`.
   * `cd_drive`: a CD drive, optionally with an ISO image set with `image`. The file will be packed within the OVA. The controller to attach to must be set with `parent` to the id of the controller. Set `connected = true` to have the image connected on startup (default is `false`)
   * `floppy`: a floppy device. Very similar to `cd_drive`, but does not need to be connected to a controller.
-  * `hard_disk`: a hard disk. This must be set to an image in streamable vmdk format with `disk_image`. The file will be packed within the OVA.
+  * `hard_disk`: a hard disk. This can be set to an image in streamable vmdk format with `disk_image`. The file will be packed within the OVA. Alternatively, if `disk_capacity` is set, an empty disk will be created.
   * `ethernet`: an ethernet device. The network must be set with `network` to one of the networks defined in the main `networks` section. Set `connected = false` to have the device disconnected on startup (default is `true`)
   * `usb_controller`, `video_card` and `vmci`: USB controller, video card and VMCI device. 
 
