@@ -585,6 +585,50 @@ def to_camel_case(snake_str):
     return ''.join(x.title() for x in snake_str.split('_'))
 
 
+class OVFProperty(object):
+
+    def __init__(self, key, type,
+                 password = False,
+                 value=None,
+                 user_configurable=False, qualifiers=None,
+                 label=None, description=None):
+        self.key = key
+        self.type = type
+        self.password = False
+        self.value = value
+        self.user_configurable = user_configurable
+        self.qualifiers = qualifiers
+        self.label = label
+        self.description = description
+
+
+    @classmethod
+    def from_dict(cls, key, type, d):
+        item = cls(key, type, **d)
+        return item
+
+
+    def xml_item(self):
+        xml_attrs = {
+            '{%s}key' % NS_OVF: self.key,
+            '{%s}type' % NS_OVF: self.type
+        }
+        if self.value is not None:
+            xml_attrs['{%s}value' % NS_OVF] = str(self.value)
+        if self.qualifiers is not None:
+            xml_attrs['{%s}qualifiers' % NS_OVF] = self.qualifiers
+        if self.user_configurable:
+            xml_attrs['{%s}userConfigurable' % NS_OVF] = "true"
+        if self.password:
+            xml_attrs['{%s}password' % NS_OVF] = "true"
+        xml_property = ET.Element('{%s}Property' % NS_OVF, xml_attrs)
+        if self.label is not None:
+            xml_property.append(xml_text_element('{%s}Label' % NS_OVF, self.label))
+        if self.description is not None:
+            xml_property.append(xml_text_element('{%s}Description' % NS_OVF, self.description))
+        return xml_property
+
+
 class OVFProduct(object):
     # snake case will be converted to camel case in XML
     keys = ['info', 'product', 'vendor', 'version', 'full_version']
@@ -592,6 +636,14 @@ class OVFProduct(object):
     def __init__(self, **kwargs):
         self.info = "Information about the installed software"
         self.__dict__.update((k, v) for k, v in kwargs.items() if k in self.keys)
+
+        self.properties = []
+        if 'properties' in kwargs:
+            props = kwargs['properties']
+            for k, v in props.items():
+                self.properties.append(OVFProperty(k, **v))
+
+        self.transports = kwargs.get('transports', None)
 
 
     @classmethod
@@ -607,6 +659,10 @@ class OVFProduct(object):
             if hasattr(self, k) and getattr(self, k) is not None:
                 xml_name = to_camel_case(k)
                 xml_product.append(xml_text_element('{%s}%s' % (NS_OVF, xml_name), getattr(self, k)))
+
+        for prop in self.properties:
+            xml_product.append(prop.xml_item())
+
         return xml_product
 
 
@@ -788,12 +844,27 @@ class OVF(object):
 
         vssd_system = VssdSystem.from_dict(config)
         rasd_items = cls.rasd_items_from_dict(config)
+
+        # we want properties in their own section ('environment')
+        # but in OVF they are part of the ProductSection, so copy it
+        if 'environment' in config:
+            env = config['environment']
+            if 'product' not in config:
+                config['product'] = {}
+            if 'transports' in env:
+                config['product']['transports'] = env['transports']
+            if 'properties' in env:
+                config['product']['properties'] = env['properties']
+
         if 'product' in config:
             product = OVFProduct.from_dict(config['product'])
+
         if 'annotation' in config:
             annotation = OVFAnnotation.from_dict(config['annotation'])
+
         if 'eula' in config:
             eula = OVFEula.from_dict(config['eula'])
+
         configurations = {}
         if 'configurations' in config:
             for k, v in config['configurations'].items():
@@ -882,7 +953,13 @@ class OVF(object):
         oss.append(xml_text_element('{%s}Info' % NS_OVF, "Operating System"))
         virtual_system.append(oss)
 
-        hw = ET.Element('{%s}VirtualHardwareSection' % NS_OVF)
+        if self.product.transports:
+            transports = " ".join(self.product.transports)
+            hw_attrs = {'{%s}transport' % NS_OVF: transports}
+        else:
+            hw_attrs = None
+        hw = ET.Element('{%s}VirtualHardwareSection' % NS_OVF, hw_attrs)
+
         hw.append(xml_text_element('{%s}Info' % NS_OVF, "Virtual Hardware"))
         virtual_system.append(hw)
 
