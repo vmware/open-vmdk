@@ -1,8 +1,23 @@
 # Introduction
 
-Open VMDK is an assistant tool for creating [Open Virtual Appliance (OVA)](https://en.wikipedia.org/wiki/Virtual_appliance). An OVA is a tar archive file with [Open Virtualization Format (OVF)](https://en.wikipedia.org/wiki/Open_Virtualization_Format) files inside, which is composed of an OVF descriptor with extension .ovf, a virtual machine disk image file with extension .vmdk, and a manifest file with extension .mf.
+Open VMDK is an assistant tool for creating [Open Virtual Appliance (OVA)](https://en.wikipedia.org/wiki/Virtual_appliance). An OVA is a tar archive file with [Open Virtualization Format (OVF)](https://en.wikipedia.org/wiki/Open_Virtualization_Format) files inside, which is composed of an OVF descriptor with extension `.ovf`, one or more virtual machine disk image files with extension `.vmdk`, and a manifest file with extension `.mf`.
 
-OVA requires stream optimized disk image file (.vmdk) so that it can be easily streamed over a network link. This tool can convert flat disk image or sparse disk image to stream optimized disk image,  and then create OVA with the converted stream optimized disk image by using an OVF descriptor template.
+This tool consists of two parts:
+
+## vmdk-convert
+
+OVA files require stream optimized disk image files (`.vmdk`) so that they can be easily streamed over a network link. `vmdk-convert` can convert raw disk images, and flat or sparse vmdk images to the stream optimized disk image format.
+
+## ova-compose
+
+The OVF file that will be embedded can be generated using `ova-compose` from a simple yaml config file.
+
+`ova-compose` will can then create the final OVA from the OVF file, the vmdk images and a manifest (a file that contains checksums of the other files).
+
+
+There is also the legacy tool `mkova.sh` that generates OVF files from templates.
+
+## Specifications
 
 The VMDK format specification can be downloaded at https://www.vmware.com/app/vmdk/?src=vmdk (pdf).
 
