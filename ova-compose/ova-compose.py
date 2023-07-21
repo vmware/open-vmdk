@@ -547,6 +547,31 @@ class OVFDisk(object):
         })
 
 
+class OVFEmptyDisk(OVFDisk):
+    def __init__(self, capacity, units="MB"):
+        self.id = f"vmdisk{OVFFile.next_id}"
+        OVFDisk.next_id += 1
+        self.capacity = capacity
+        if units == "KB":
+            units = "byte * 2^10"
+        elif units == "MB":
+            units = "byte * 2^20"
+        elif units == "GB":
+            units = "byte * 2^30"
+        elif units == "TB":
+            units = "byte * 2^30"
+        self.units = units
+
+
+    def xml_item(self):
+        return ET.Element('{%s}Disk' % NS_OVF, {
+            '{%s}capacity' % NS_OVF: str(self.capacity),
+            '{%s}capacityAllocationUnits' % NS_OVF: self.units,
+            '{%s}diskId' % NS_OVF: self.id,
+            '{%s}format' % NS_OVF: 'http://www.vmware.com/interfaces/specifications/vmdk.html#streamOptimized'
+        })
+
+
 def to_camel_case(snake_str):
     return ''.join(x.title() for x in snake_str.split('_'))
 
@@ -705,6 +730,10 @@ class OVF(object):
                     disk = OVFDisk(hw['disk_image'])
                     disks.append(disk)
                     files.append(disk.file)
+                    hw['disk'] = disk
+                elif 'disk_capacity' in hw:
+                    disk = OVFEmptyDisk(hw['disk_capacity'])
+                    disks.append(disk)
                     hw['disk'] = disk
 
         networks = {}
