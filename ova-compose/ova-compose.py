@@ -900,6 +900,7 @@ def usage():
     print("  -i, --input-file <file>     input file")
     print("  -o, --output-file <file>    output file or directory name")
     print("  -f, --format ova|ovf|dir    output format")
+    print("  -m, --manifest              create manifest file along with ovf (default true for output formats ova and dir)")
     print("  -q                          quiet mode")
     print("  -h                          print help")
     print("")
@@ -937,10 +938,11 @@ def main():
     output_format = None
     basename = None
     do_quiet = False
+    do_manifest = False
     params = {}
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:], 'hi:o:q', longopts=['format=', 'input-file=', 'output-file=', 'param='])
+        opts, args = getopt.getopt(sys.argv[1:], 'f:hi:mo:q', longopts=['format=', 'input-file=', 'manifest', 'output-file=', 'param='])
     except:
         print ("invalid option")
         sys.exit(2)
@@ -952,6 +954,8 @@ def main():
             output_file = a
         elif o in ['-f', '--format']:
             output_format = a
+        elif o in ['-m', '--manifest']:
+            do_manifest = True
         elif o in ['--param']:
             k,v = a.split('=')
             params[k] = yaml.safe_load(v)
@@ -984,30 +988,33 @@ def main():
             # create an ova file
             output_format = "ova"
         elif output_file.endswith(".ovf"):
-            # create just the ovf file
+            # create just ovf (and maybe mf) file
             output_format = "ovf"
 
     assert output_format != None, "no output format specified"
-    assert output_format in ['ova', 'ovf', 'dir'], f"invalid ouput_format '{output_format}'"
+    assert output_format in ['ova', 'ovf', 'dir'], f"invalid output_format '{output_format}'"
 
     if not do_quiet:
         print (f"creating '{output_file}' with format '{output_format}' from '{config_file}'")
 
+    if output_format != "dir":
+        basename = os.path.basename(output_file)[:-4]
+    else:
+        basename = os.path.basename(output_file)
+    mf_file = f"{basename}.mf"
+
     if output_format == "ovf":
         ovf_file = output_file
         ovf.write_xml(ovf_file=ovf_file)
+        if do_manifest:
+            ovf.write_manifest(ovf_file=ovf_file, mf_file=mf_file)
     elif output_format == "ova" or output_format == "dir":
-        if output_format == "ova":
-            basename = os.path.basename(output_file)[:-4]
-        else:
-            basename = os.path.basename(output_file)
         pwd = os.getcwd()
         tmpdir = tempfile.mkdtemp(prefix=f"{basename}-", dir=pwd)
         try:
             os.chdir(tmpdir)
             ovf_file = f"{basename}.ovf"
             ovf.write_xml(ovf_file=ovf_file)
-            mf_file = f"{basename}.mf"
 
             all_files = [ovf_file, mf_file]
             for file in ovf.files:
