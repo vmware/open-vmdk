@@ -116,6 +116,7 @@ class RasdItem(VirtualHardware):
     description = "Virtual Hardware Item"
     config = {}
     connectable = False
+    configuration = None
 
     def __init__(self, subtype=None):
         RasdItem.last_instance_id += 1
@@ -154,6 +155,8 @@ class RasdItem(VirtualHardware):
 
         if not required:
             attrs["{%s}required" % NS_OVF] = 'false'
+        if self.configuration:
+            attrs["{%s}configuration" % NS_OVF] = self.configuration
 
         item = ET.Element('{%s}Item' % NS_OVF, attrs)
         
@@ -180,9 +183,13 @@ class RasdCpus(RasdItem):
         super().__init__()
         self.num = int(num)
 
+
     @classmethod
     def from_dict(cls, d):
-        item = cls(d)
+        if type(d) is int:
+            item = cls(d)
+        else:
+            item = cls(d['number'])
         return item
 
 
@@ -206,7 +213,10 @@ class RasdMemory(RasdItem):
 
     @classmethod
     def from_dict(cls, d):
-        item = cls(d)
+        if type(d) is int:
+            item = cls(d)
+        else:
+            item = cls(d['size'])
         return item
 
 
@@ -229,7 +239,6 @@ class RasdController(RasdItem):
     @classmethod
     def from_dict(cls, d):
         item = cls(d.get('subtype', None))
-        subtype = d.get('subtype', None)
         return item
 
 
@@ -659,6 +668,32 @@ class OVFEula(OVFTextBlock):
         return ET.Element('{%s}%s' % (NS_OVF, self.xml_name), { '{%s}msgid' % NS_OVF: "eula"})
 
 
+class OVFConfiguration(object):
+    keys = ['label', 'description', 'default']
+
+    def __init__(self, id, **kwargs):
+        self.id = id
+        self.default = False
+        self.info = "Information about the installed software"
+        self.__dict__.update((k, v) for k, v in kwargs.items() if k in self.keys)
+
+
+    @classmethod
+    def from_dict(cls, config):
+        item = cls(**d)
+        return item
+
+
+    def xml_item(self):
+        attrs = {'{%s}id' % NS_OVF: self.id}
+        if self.default:
+            attrs['{%s}default' % NS_OVF] = "true"
+        elem = ET.Element('{%s}Configuration' % NS_OVF, attrs)
+        elem.append(xml_text_element('{%s}%s' % (NS_OVF, 'Label'), getattr(self, 'label')))
+        elem.append(xml_text_element('{%s}%s' % (NS_OVF, 'Description'), getattr(self, 'description')))
+        return elem
+
+
 class OVF(object):
 
     CONFIG_DEFAULTS = {
@@ -685,7 +720,11 @@ class OVF(object):
     }
 
 
-    def __init__(self, system, files, disks, networks, vssd_system, rasd_items, product, annotation, eula):
+    def __init__(self,
+                 system, files, disks,
+                 networks, vssd_system, rasd_items,
+                 product, annotation, eula,
+                 configurations):
         self.hardware_config = OVF.CONFIG_DEFAULTS.copy()
         self.name = system['name']
         self.os_cim = system.get('os_cim', 100)
@@ -706,6 +745,12 @@ class OVF(object):
         self.product = product
         self.annotation = annotation
         self.eula = eula
+        self.configurations = configurations
+
+        if 'default_configuration' in system:
+            dflt_cfg = system['default_configuration']
+            self.configurations[dflt_cfg].default = True
+
         self.connect()
 
 
@@ -749,8 +794,15 @@ class OVF(object):
             annotation = OVFAnnotation.from_dict(config['annotation'])
         if 'eula' in config:
             eula = OVFEula.from_dict(config['eula'])
+        configurations = {}
+        if 'configurations' in config:
+            for k, v in config['configurations'].items():
+                configurations[k] = OVFConfiguration(k, **v)
 
-        ovf = cls(config['system'], files, disks, networks, vssd_system, rasd_items, product, annotation, eula)
+        ovf = cls(config['system'], files, disks,
+                  networks, vssd_system, rasd_items,
+                  product, annotation, eula,
+                  configurations)
 
         return ovf
 
@@ -770,6 +822,8 @@ class OVF(object):
             try:
                 cl = getattr(sys.modules[__name__], cl_name)
                 rasd_item = cl.from_dict(hw_config)
+                if type(hw_config) is dict:
+                    rasd_item.configuration = hw_config.get('configuration', None)
                 rasd_items[hw_id] = rasd_item
             except AttributeError:
                 print(f"no class {cl_name}")
@@ -804,6 +858,13 @@ class OVF(object):
             disk_section.append(disk.xml_item())
         envelope.append(disk_section)
 
+        if self.configurations:
+            dos = ET.Element('{%s}DeploymentOptionSection' % NS_OVF)
+            dos.append(xml_text_element('{%s}Info' % NS_OVF, "List of profiles"))
+            for id, config in self.configurations.items():
+                dos.append(config.xml_item())
+            envelope.append(dos)
+                
         # NetworkSection
         network_section = ET.Element('{%s}NetworkSection' % NS_OVF)
         network_section.append(xml_text_element('{%s}Info' % NS_OVF, "Virtual Networks"))
@@ -837,6 +898,7 @@ class OVF(object):
 
         if self.product:
             virtual_system.append(self.product.xml_item())
+
         if self.annotation:
             virtual_system.append(self.annotation.xml_item())
         if self.eula:

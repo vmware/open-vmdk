@@ -117,6 +117,7 @@ system:
     os_vmw: other4xLinux64Guest
     firmware: efi
     secure_boot: true
+    default_configuration: grande
 
 networks:
     vm_network:
@@ -148,6 +149,17 @@ hardware:
     vmci1:
         type: vmci
 
+configurations:
+    tall:
+        label: Tall
+        description: too little for the money
+    grande:
+        label: Grande
+        description: just right
+    venti:
+        label: Venti
+        description: too much
+
 product:
     product: An Example VM
     vendor: A Company Inc.
@@ -159,7 +171,7 @@ eula:
     file: eula.txt
 ```
 
-The config file has 3 mandatory and 3 optional sections. `system`, `networks` and `hardware` are mandatory.
+The config file has 3 mandatory and 4 optional sections. `system`, `networks` and `hardware` are mandatory.
 * `system` describes basic properties of the whole system, like name, hardware compatibility version and others.
 * `networks` describes the network used. Each entry is a unique id. Each of these entries needs a `name` and a `description`.
 * `hardware` describes the hardware components. Every entry is a unique id that can be any name, except the reserved ids `cpus` and `memory`. Each components except `cpus` and `memory` must have a `type`. The type can be one of the values described below.
@@ -174,10 +186,25 @@ The config file has 3 mandatory and 3 optional sections. `system`, `networks` an
   * `floppy`: a floppy device. Very similar to `cd_drive`, but does not need to be connected to a controller.
   * `hard_disk`: a hard disk. This can be set to an image in streamable vmdk format with `disk_image`. The file will be packed within the OVA. Alternatively, if `disk_capacity` is set, an empty disk will be created.
   * `ethernet`: an ethernet device. The network must be set with `network` to one of the networks defined in the main `networks` section. Set `connected = false` to have the device disconnected on startup (default is `true`)
-  * `usb_controller`, `video_card` and `vmci`: USB controller, video card and VMCI device. 
+  * `usb_controller`, `video_card` and `vmci`: USB controller, video card and VMCI device.
+  Optionally, each `hardware` item can have ` configuration` setting. If set, the hardware item will be present only for that particular `configuration`. This is useful to have different memory sizes, number of CPUs perconfiguration, or make hardware items only present for a particular configuration.
+  * `cpus` can be set as a hardware type. In this case, the field `number` sets the number of CPUs. This is useful for different configurations.
+  * `memory` can also be set as a hardware type. The size is specified with `size`.
 
-These 3 sections are optional:
+These sections are optional:
 * `product` describes the product. It has the fields `info`, `product`, `vendor`, `version` and `full_version`.
+* `configurations` describes different OVF configurations that can be selected at deployment time. It is a map with the configuration id as key, and the fields `label`, `description` and optionally `default`: 
+```
+configurations:
+    tall:
+        label: Tall
+        description: too little for the money
+    grande:
+        default: true
+        label: Grande
+        description: just right
+```
+The default can also be set with `default_configuration` in the `system` section.
 * `annotation` has the fields `info`, `text` and `file`. `text` and `file` are mutually exclusive - `text` is text inline, `file` can be set to a text file that will be filled in. The annotation text will appear for example as a comment in VMware Fusion.
 * `eula` also has the fields `info`, `text` and `file`. It contains the EULA agreement the user has to agree to when deploying the VM.
 
