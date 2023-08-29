@@ -12,7 +12,7 @@ OVA files require stream optimized disk image files (`.vmdk`) so that they can b
 
 The OVF file that will be embedded can be generated using `ova-compose` from a simple yaml config file.
 
-`ova-compose` will can then create the final OVA from the OVF file, the vmdk images and a manifest (a file that contains checksums of the other files).
+`ova-compose` will then create the final OVA from the OVF file, the vmdk images and a manifest (a file that contains checksums of the other files).
 
 
 There is also the legacy tool `mkova.sh` that generates OVF files from templates.
