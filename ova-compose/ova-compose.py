@@ -532,7 +532,7 @@ class OVFDisk(object):
 
 
     def __init__(self, path):
-        self.id = f"vmdisk{OVFFile.next_id}"
+        self.id = f"vmdisk{OVFDisk.next_id}"
         OVFDisk.next_id += 1
         self.file = OVFFile(path)
 
@@ -558,7 +558,7 @@ class OVFDisk(object):
 
 class OVFEmptyDisk(OVFDisk):
     def __init__(self, capacity, units="MB"):
-        self.id = f"vmdisk{OVFFile.next_id}"
+        self.id = f"vmdisk{OVFDisk.next_id}"
         OVFDisk.next_id += 1
         self.capacity = capacity
         if units == "KB":
