@@ -953,7 +953,7 @@ class OVF(object):
         oss.append(xml_text_element('{%s}Info' % NS_OVF, "Operating System"))
         virtual_system.append(oss)
 
-        if self.product.transports:
+        if self.product and self.product.transports:
             transports = " ".join(self.product.transports)
             hw_attrs = {'{%s}transport' % NS_OVF: transports}
         else:
