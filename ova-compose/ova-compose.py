@@ -1062,7 +1062,7 @@ def yaml_param(loader, node):
     assert type(key) is str, f"param name must be a string"
 
     if '=' in key:
-        key, default = [t.strip() for t in key.split('=')]
+        key, default = [t.strip() for t in key.split('=', maxsplit=1)]
         default = yaml.safe_load(default)
     value = params.get(key, default)
 
@@ -1096,7 +1096,7 @@ def main():
         elif o in ['-m', '--manifest']:
             do_manifest = True
         elif o in ['--param']:
-            k,v = a.split('=')
+            k,v = a.split('=', maxsplit=1)
             params[k] = yaml.safe_load(v)
         elif o in ['-q']:
             do_quiet = True
