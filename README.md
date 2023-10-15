@@ -160,6 +160,18 @@ configurations:
         label: Venti
         description: too much
 
+environment:
+    transports:
+        - com.vmware.guestInfo
+        - iso
+    properties:
+        guestinfo.admin.email:
+            value: admin@company.org
+            user_configurable: true
+            type: string
+            description: "The Admin's email address"
+            label: "Email Address"
+
 product:
     product: An Example VM
     vendor: A Company Inc.
@@ -205,6 +217,7 @@ configurations:
         description: just right
 ```
 The default can also be set with `default_configuration` in the `system` section.
+* `environment` is for setting OVF properties. Variables are added under the new `environment` section as a `properties` map. The key is the name of the variable. Each variable has a mandatory `type`. `value`, `user_configurable` (default: `false`), `qualifiers`, `password` (default `false`),`label`, `description` are optional. Additionally, `transports` can be set in a list. Valid values are `iso` and `com.vmware.guestInfo`. Note that at least one of them must be set to make the properties visible inside the guest.
 * `annotation` has the fields `info`, `text` and `file`. `text` and `file` are mutually exclusive - `text` is text inline, `file` can be set to a text file that will be filled in. The annotation text will appear for example as a comment in VMware Fusion.
 * `eula` also has the fields `info`, `text` and `file`. It contains the EULA agreement the user has to agree to when deploying the VM.
 
