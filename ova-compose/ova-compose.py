@@ -883,9 +883,10 @@ class OVF(object):
                     hw['disk'] = disk
 
         networks = {}
-        for nw_id, nw in config['networks'].items():
-            network = OVFNetwork.from_dict(nw)
-            networks[nw_id] = network
+        if 'networks' in config:
+            for nw_id, nw in config['networks'].items():
+                network = OVFNetwork.from_dict(nw)
+                networks[nw_id] = network
 
         vssd_system = VssdSystem.from_dict(config)
         rasd_items = cls.rasd_items_from_dict(config)
