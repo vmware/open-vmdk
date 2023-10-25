@@ -735,7 +735,7 @@ class OVFConfiguration(object):
 
 
     @classmethod
-    def from_dict(cls, config):
+    def from_dict(cls, d):
         item = cls(**d)
         return item
 
@@ -747,6 +747,34 @@ class OVFConfiguration(object):
         elem = ET.Element('{%s}Configuration' % NS_OVF, attrs)
         elem.append(xml_text_element('{%s}%s' % (NS_OVF, 'Label'), getattr(self, 'label')))
         elem.append(xml_text_element('{%s}%s' % (NS_OVF, 'Description'), getattr(self, 'description')))
+        return elem
+
+
+class VmwExtraConfigItem(object):
+
+    def __init__(self, key, value, required=None):
+        self.key = key
+        self.value = value
+        self.required = required
+
+
+    @classmethod
+    def from_dict(cls, d):
+        item = cls(**d)
+        return item
+
+
+    def xml_item(self):
+        value = self.value
+        if type(value) is bool:
+            value = "true" if value else "false"
+        elif type(value) is not str:
+            value = str(value)
+
+        attrs = {'{%s}key' % NS_VMW: self.key, '{%s}value' % NS_VMW: value}
+        if self.required is not None:
+            attrs['{%s}required' % NS_VMW] = "true" if self.required else "false"
+        elem = ET.Element('{%s}ExtraConfig' % NS_VMW, attrs)
         return elem
 
 
@@ -778,7 +806,8 @@ class OVF(object):
 
     def __init__(self,
                  system, files, disks,
-                 networks, vssd_system, rasd_items,
+                 networks,
+                 vssd_system, rasd_items, extra_configs,
                  product, annotation, eula,
                  configurations):
         self.hardware_config = OVF.CONFIG_DEFAULTS.copy()
@@ -798,6 +827,7 @@ class OVF(object):
         self.networks = networks
         self.vssd_system = vssd_system
         self.rasd_items = rasd_items
+        self.extra_configs = extra_configs
         self.product = product
         self.annotation = annotation
         self.eula = eula
@@ -844,6 +874,7 @@ class OVF(object):
 
         vssd_system = VssdSystem.from_dict(config)
         rasd_items = cls.rasd_items_from_dict(config)
+        extra_configs = cls.vmw_extra_config_items_from_dict(config)
 
         # we want properties in their own section ('environment')
         # but in OVF they are part of the ProductSection, so copy it
@@ -871,7 +902,7 @@ class OVF(object):
                 configurations[k] = OVFConfiguration(k, **v)
 
         ovf = cls(config['system'], files, disks,
-                  networks, vssd_system, rasd_items,
+                  networks, vssd_system, rasd_items, extra_configs,
                   product, annotation, eula,
                   configurations)
 
@@ -899,6 +930,19 @@ class OVF(object):
             except AttributeError:
                 print(f"no class {cl_name}")
         return rasd_items
+
+
+    @classmethod
+    def vmw_extra_config_items_from_dict(cls, config):
+        xtra_cfgs = []
+        xconfigs = config.get('extra_configs', None)
+        if xconfigs is None:
+            return []
+        for key, cfg in xconfigs.items():
+            cfg['key'] = key
+            xtra_cfg_item = VmwExtraConfigItem.from_dict(cfg)
+            xtra_cfgs.append(xtra_cfg_item)
+        return xtra_cfgs
 
 
     def connect(self):
@@ -969,6 +1013,9 @@ class OVF(object):
             # sort rasd elements by tag:
             xml_item[:] = sorted(xml_item, key=lambda child: child.tag)
             hw.append(xml_item)
+
+        for xcfg in self.extra_configs:
+            hw.append(xcfg.xml_item())
 
         for key, val in sorted(self.hardware_config.items()):
             hw.append(xml_config(key, val))
