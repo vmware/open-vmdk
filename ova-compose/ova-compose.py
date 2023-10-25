@@ -825,7 +825,9 @@ class OVF(object):
                  vssd_system, rasd_items, extra_configs,
                  product, annotation, eula,
                  configurations):
-        self.hardware_config = OVF.CONFIG_DEFAULTS.copy()
+        self.hardware_config = {}
+        if not system.get('no_default_configs', False):
+            self.hardware_config.update(OVF.CONFIG_DEFAULTS)
         self.name = system['name']
         self.os_cim = system.get('os_cim', 100)
         self.os_vmw = system.get('os_vmw', "other4xLinux64Guest")
