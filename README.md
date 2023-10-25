@@ -164,6 +164,8 @@ environment:
     transports:
         - com.vmware.guestInfo
         - iso
+    categories:
+        email: Email Settings
     properties:
         guestinfo.admin.email:
             value: admin@company.org
@@ -171,6 +173,14 @@ environment:
             type: string
             description: "The Admin's email address"
             label: "Email Address"
+            category: email
+
+extra_configs:
+    feature.enabled:
+        required: false
+        value: true
+    log.rotateSize:
+        value: 2048000
 
 product:
     product: An Example VM
@@ -217,7 +227,8 @@ configurations:
         description: just right
 ```
 The default can also be set with `default_configuration` in the `system` section.
-* `environment` is for setting OVF properties. Variables are added under the new `environment` section as a `properties` map. The key is the name of the variable. Each variable has a mandatory `type`. `value`, `user_configurable` (default: `false`), `qualifiers`, `password` (default `false`),`label`, `description` are optional. Additionally, `transports` can be set in a list. Valid values are `iso` and `com.vmware.guestInfo`. Note that at least one of them must be set to make the properties visible inside the guest.
+* `environment` is for setting OVF properties. Variables are added under the new `environment` section as a `properties` map. The key is the name of the variable. Each variable has a mandatory `type`. `value`, `user_configurable` (default: `false`), `qualifiers`, `password` (default `false`),`label`, `description` are optional. Additionally, `transports` can be set in a list. Valid values are `iso` and `com.vmware.guestInfo`. Note that at least one of them must be set to make the properties visible inside the guest. Optionally, categories are set with `categories` to a map with an id as key and a description as value. Each property can have a `category` set to a category id.
+* `extra_configs` is a map of settings with the fields `value` and optionally the boolean `required`.
 * `annotation` has the fields `info`, `text` and `file`. `text` and `file` are mutually exclusive - `text` is text inline, `file` can be set to a text file that will be filled in. The annotation text will appear for example as a comment in VMware Fusion.
 * `eula` also has the fields `info`, `text` and `file`. It contains the EULA agreement the user has to agree to when deploying the VM.
 
