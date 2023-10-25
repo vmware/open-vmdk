@@ -591,7 +591,7 @@ class OVFProperty(object):
                  password = False,
                  value=None,
                  user_configurable=False, qualifiers=None,
-                 label=None, description=None):
+                 label=None, description=None, category=None):
         self.key = key
         self.type = type
         self.password = False
@@ -600,6 +600,7 @@ class OVFProperty(object):
         self.qualifiers = qualifiers
         self.label = label
         self.description = description
+        self.category = category
 
 
     @classmethod
@@ -644,6 +645,12 @@ class OVFProduct(object):
                 self.properties.append(OVFProperty(k, **v))
 
         self.transports = kwargs.get('transports', None)
+        self.categories = kwargs.get('categories', None)
+
+        # if a property references a non-existing category it will be dropped
+        for prop in self.properties:
+            assert prop.category is None or prop.category in self.categories,\
+                f"property '{prop.key}' references unknown category '{prop.category}'"
 
 
     @classmethod
@@ -660,8 +667,16 @@ class OVFProduct(object):
                 xml_name = to_camel_case(k)
                 xml_product.append(xml_text_element('{%s}%s' % (NS_OVF, xml_name), getattr(self, k)))
 
+        # append category-less properties first
         for prop in self.properties:
-            xml_product.append(prop.xml_item())
+            if prop.category is None:
+                xml_product.append(prop.xml_item())
+        # then go through all categories, and append matching props
+        for cat_id, cat_name in self.categories.items():
+            xml_product.append(xml_text_element('{%s}Category' % NS_OVF, cat_name))
+            for prop in self.properties:
+                if prop.category == cat_id:
+                    xml_product.append(prop.xml_item())
 
         return xml_product
 
@@ -882,10 +897,9 @@ class OVF(object):
             env = config['environment']
             if 'product' not in config:
                 config['product'] = {}
-            if 'transports' in env:
-                config['product']['transports'] = env['transports']
-            if 'properties' in env:
-                config['product']['properties'] = env['properties']
+            for cfg in ['transports', 'properties', 'categories']:
+                if cfg in env:
+                    config['product'][cfg] = env[cfg]
 
         if 'product' in config:
             product = OVFProduct.from_dict(config['product'])
