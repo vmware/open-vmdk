@@ -644,8 +644,8 @@ class OVFProduct(object):
             for k, v in props.items():
                 self.properties.append(OVFProperty(k, **v))
 
-        self.transports = kwargs.get('transports', None)
-        self.categories = kwargs.get('categories', None)
+        self.transports = kwargs.get('transports', [])
+        self.categories = kwargs.get('categories', {})
 
         # if a property references a non-existing category it will be dropped
         for prop in self.properties:
@@ -866,6 +866,8 @@ class OVF(object):
         product = None
         annotation = None
         eula = None
+
+        assert 'hardware' in config, "config needs a 'hardware' section"
 
         hardware = config['hardware']
         for hw_id, hw in hardware.items():
