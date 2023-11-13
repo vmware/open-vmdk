@@ -1076,13 +1076,14 @@ class OVF(object):
 
 
     @staticmethod
-    def _get_sha512(filename):
+    def _get_hash(filename, hash_type):
+        hash = hashlib.new(hash_type)
         with open(filename, "rb") as f:
-            hash = hashlib.sha512(f.read()).hexdigest();
-        return hash
+            hash.update(f.read())
+        return hash.hexdigest()
 
 
-    def write_manifest(self, ovf_file=None, mf_file=None):
+    def write_manifest(self, ovf_file=None, mf_file=None, hash_type="sha512"):
         if ovf_file == None:
             ovf_file = f"{self.name}.ovf"
         if mf_file == None:
@@ -1093,9 +1094,9 @@ class OVF(object):
             filenames.append(file.path)
         with open(mf_file, "wt") as f:
             for fname in filenames:
-                hash = OVF._get_sha512(fname)
+                hash = OVF._get_hash(fname, hash_type)
                 fname = os.path.basename(fname)
-                f.write(f"SHA512({fname})= {hash}\n")
+                f.write(f"{hash_type.upper()}({fname})= {hash}\n")
 
 
 def usage():
@@ -1106,6 +1107,7 @@ def usage():
     print("  -o, --output-file <file>    output file or directory name")
     print("  -f, --format ova|ovf|dir    output format")
     print("  -m, --manifest              create manifest file along with ovf (default true for output formats ova and dir)")
+    print("  --checksum-type sha256|sha512  set the checksum type for the manifest. Must be sha256 or sha512.")
     print("  -q                          quiet mode")
     print("  -h                          print help")
     print("")
@@ -1145,9 +1147,10 @@ def main():
     do_quiet = False
     do_manifest = False
     params = {}
+    checksum_type = "sha512"
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:], 'f:hi:mo:q', longopts=['format=', 'input-file=', 'manifest', 'output-file=', 'param='])
+        opts, args = getopt.getopt(sys.argv[1:], 'f:hi:mo:q', longopts=['format=', 'input-file=', 'manifest', 'output-file=', 'param=', 'checksum-type='])
     except:
         print ("invalid option")
         sys.exit(2)
@@ -1161,6 +1164,8 @@ def main():
             output_format = a
         elif o in ['-m', '--manifest']:
             do_manifest = True
+        elif o in ['--checksum-type']:
+            checksum_type = a
         elif o in ['--param']:
             k,v = a.split('=', maxsplit=1)
             params[k] = yaml.safe_load(v)
@@ -1174,6 +1179,8 @@ def main():
 
     assert config_file != None, "no input file specified"
     assert output_file != None, "no output file/directory specified"
+
+    assert checksum_type in ["sha512", "sha256"], f"checksum-type '{checksum_type}' is invalid"
 
     if config_file != None:
         f = open(config_file, 'r')
@@ -1212,7 +1219,7 @@ def main():
         ovf_file = output_file
         ovf.write_xml(ovf_file=ovf_file)
         if do_manifest:
-            ovf.write_manifest(ovf_file=ovf_file, mf_file=mf_file)
+            ovf.write_manifest(ovf_file=ovf_file, mf_file=mf_file, hash_type=checksum_type)
     elif output_format == "ova" or output_format == "dir":
         pwd = os.getcwd()
         tmpdir = tempfile.mkdtemp(prefix=f"{basename}-", dir=pwd)
@@ -1227,7 +1234,7 @@ def main():
                 os.symlink(os.path.join(pwd, file.path), dst)
                 all_files.append(dst)
 
-            ovf.write_manifest(ovf_file=ovf_file, mf_file=mf_file)
+            ovf.write_manifest(ovf_file=ovf_file, mf_file=mf_file, hash_type=checksum_type)
 
             if output_format == "ova":
                 ret = subprocess.check_call(["tar", "--format=ustar", "-h",
