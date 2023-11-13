@@ -1,0 +1,70 @@
+system:
+    name: minimal
+    type: vmx-14 vmx-20
+    os_vmw: vmwarePhoton64Guest
+    default_configuration: grande
+
+networks:
+    vm_network:
+        name: "None"
+        description: "The None network"
+
+hardware:
+    cpus: 2
+    memory_tall:
+        type: memory
+        size: 2048
+        configuration: tall
+    memory_grande:
+        type: memory
+        size: 4096
+        configuration: grande
+    memory_venti:
+        type: memory
+        size: 8192
+        configuration: venti
+    sata1:
+        type: sata_controller
+    cdrom1:
+        type: cd_drive
+        parent: sata1
+    rootdisk:
+        type: hard_disk
+        parent: sata1
+        disk_image: dummy.vmdk
+    homedisk_tall:
+        type: hard_disk
+        parent: sata1
+        disk_capacity: 10000
+        configuration: tall
+    homedisk_grande:
+        type: hard_disk
+        parent: sata1
+        disk_capacity: 20000
+        configuration: grande
+    homedisk_venti:
+        type: hard_disk
+        parent: sata1
+        disk_capacity: 40000
+        configuration: venti
+    usb1:
+        type: usb_controller
+    ethernet1:
+        type: ethernet
+        subtype: VmxNet3
+        network: vm_network
+    videocard1:
+        type: video_card
+    vmci1:
+        type: vmci
+
+configurations:
+    tall:
+        label: Tall
+        description: too little for the money
+    grande:
+        label: Grande
+        description: just right
+    venti:
+        label: Venti
+        description: too much

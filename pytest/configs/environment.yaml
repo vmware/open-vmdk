@@ -1,0 +1,56 @@
+system:
+    name: minimal
+    type: vmx-14 vmx-20
+    os_vmw: vmwarePhoton64Guest
+
+networks:
+    vm_network:
+        name: "None"
+        description: "The None network"
+
+hardware:
+    cpus: 2
+    memory:
+        type: memory
+        size: 4096
+    sata1:
+        type: sata_controller
+    cdrom1:
+        type: cd_drive
+        parent: sata1
+    rootdisk:
+        type: hard_disk
+        parent: sata1
+        disk_image: dummy.vmdk
+    usb1:
+        type: usb_controller
+    ethernet1:
+        type: ethernet
+        subtype: VmxNet3
+        network: vm_network
+    videocard1:
+        type: video_card
+    vmci1:
+        type: vmci
+
+environment:
+    transports:
+        - iso
+        - com.vmware.guestInfo
+    categories:
+        some: Some Properties
+    properties:
+        prop.int:
+            user_configurable: true
+            type: uint16
+            value: '50000'
+            description: "an unsigned integer"
+            label: "integer"
+            category: some
+        prop.string:
+            user_configurable: true
+            type: string
+            value: 'a string'
+            description: "a string, yo"
+            label: "string"
+            category: some

@@ -1,0 +1,32 @@
+name: open-vmdk pytests
+
+on: [pull_request, push, workflow_dispatch]
+
+jobs:
+    pytests:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: install build deps
+              run: sudo apt-get -y install zlib1g-dev
+
+            - name: build
+              working-directory: ${{ github.workspace }}
+              run: make
+
+            - name: install
+              working-directory: ${{ github.workspace }}
+              run: sudo make install
+
+            - name: set up python 3
+              uses: actions/setup-python@v4
+              with:
+                python-version: '3.x'
+
+            - name: install pytest
+              run: pip install pytest PyYAML lxml xmltodict
+
+            - name: run tests
+              working-directory: ${{ github.workspace }}
+              run: pytest pytest/
