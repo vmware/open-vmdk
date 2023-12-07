@@ -263,7 +263,8 @@ Options:
   * `ova` to create an OVA file
   * `ovf` to create just the OVF file
   * `dir` to create a directory containing the OVF file, the manifest and the files used for the cdrom and harddisk devices.
-* `--param <key=value>`: set parameter `<key>` to `<value>`.
+* `--param <key=value>`: set parameter `<key>` to `<value>`
+* `--checksum-type sha256|sha512`: the checksum type used for the manifest file. The default is `sha512`. Some backends do not support this, in that case use `sha256`.
  
 Example:
 ```
