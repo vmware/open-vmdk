@@ -72,7 +72,7 @@ def test_ovf_manifest(hash_type):
     if hash_type is not None:
         args += ["--checksum-type", hash_type]
     else:
-        hash_type = "sha512"
+        hash_type = "sha256"
 
     process = subprocess.run(args, cwd=WORK_DIR)
     assert process.returncode == 0
@@ -93,7 +93,7 @@ def test_ova_manifest(hash_type):
     if hash_type is not None:
         args += ["--checksum-type", hash_type]
     else:
-        hash_type = "sha512"
+        hash_type = "sha256"
 
     process = subprocess.run(args, cwd=WORK_DIR)
     assert process.returncode == 0
