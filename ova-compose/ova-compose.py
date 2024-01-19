@@ -279,6 +279,18 @@ class RasdSataController(RasdController):
     def xml_item(self, required, element_name):
         item = super().xml_item(required, element_name)
         item.append(self.xml_element('ResourceSubType', 'vmware.sata.ahci'))
+
+        return item
+
+
+class RasdNvmeController(RasdController):
+    resource_type = 20
+    description = "NVME Controller"
+
+
+    def xml_item(self, required, element_name):
+        item = super().xml_item(required, element_name)
+        item.append(self.xml_element('ResourceSubType', 'vmware.nvme.controller'))
         
         return item
 
@@ -356,6 +368,17 @@ class RasdUsbController(RasdItem):
         item = super().xml_item(required, element_name)
         item.append(self.xml_element('ResourceSubType', 'vmware.usb.ehci'))
         item.append(xml_config('ehciEnabled', 'true'))
+        return item
+
+
+class RasdUsb3Controller(RasdItem):
+    resource_type = 23
+    description = "USB3 Controller"
+
+
+    def xml_item(self, required, element_name):
+        item = super().xml_item(required, element_name)
+        item.append(self.xml_element('ResourceSubType', 'vmware.usb.xhci'))
         return item
 
 
