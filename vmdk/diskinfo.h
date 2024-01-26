@@ -16,23 +16,23 @@
 #ifndef _DISKINFO_H_
 #define _DISKINFO_H_
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <unistd.h>
 
 typedef struct DiskInfo DiskInfo;
 
 typedef struct {
-	off_t (*getCapacity)(DiskInfo *self);
-	ssize_t (*pread)(DiskInfo *self, void *buf, size_t len, off_t pos);
-	ssize_t (*pwrite)(DiskInfo *self, const void *buf, size_t len, off_t pos);
-	int (*nextData)(DiskInfo *self, off_t *pos, off_t *end);
-	int (*close)(DiskInfo *self);
-	int (*abort)(DiskInfo *self);
+    off_t (*getCapacity)(DiskInfo *self);
+    ssize_t (*pread)(DiskInfo *self, void *buf, size_t len, off_t pos);
+    ssize_t (*pwrite)(DiskInfo *self, const void *buf, size_t len, off_t pos);
+    int (*nextData)(DiskInfo *self, off_t *pos, off_t *end);
+    int (*close)(DiskInfo *self);
+    int (*abort)(DiskInfo *self);
 } DiskInfoVMT;
 
 struct DiskInfo {
-	const DiskInfoVMT *vmt;
+    const DiskInfoVMT *vmt;
 };
 
 extern char *toolsVersion; /* toolsVersion in metadata */
