@@ -13,7 +13,7 @@
 # specific language governing permissions and limitations under the License.
 # ================================================================================
 
-SRC := flat.c sparse.c mkdisk.c
+SRC := flat.c sparse.c mkdisk.c parse_cmd.c
 OUTPUTDIR := ../build/vmdk
 EXE := $(OUTPUTDIR)/vmdk-convert
 
@@ -38,7 +38,7 @@ $(OUTPUTDIR)/%.o: %.c | $(OUTPUTDIR)
 $(OUTPUTDIR):
 	mkdir -p $(OUTPUTDIR)
 
-$(addprefix $(OUTPUTDIR)/,mkdisk.o flat.o sparse.o): diskinfo.h
+$(addprefix $(OUTPUTDIR)/,mkdisk.o flat.o sparse.o parse_cmd.o): diskinfo.h parse_cmd.h
 
 $(addprefix $(OUTPUTDIR)/,sparse.o): vmware_vmdk.h
 

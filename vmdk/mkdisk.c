@@ -23,10 +23,7 @@
 #include <sys/time.h>
 
 #include "diskinfo.h"
-
-/* toolsVersion in metadata -
-   default is 2^31-1 (unknown) */
-char *toolsVersion = "2147483647";
+#include "parse_cmd.h"
 
 static int copyData(DiskInfo *dst, off_t dstOffset, DiskInfo *src, off_t srcOffset, uint64_t length) {
     char buf[65536];
@@ -76,78 +73,37 @@ failAll:
     return false;
 }
 
-/* Displays the usage message. */
-static int printUsage(char *cmd) {
-    printf("Usage:\n");
-    printf("%s -i src.vmdk: displays information for specified virtual disk\n", cmd);
-    printf(
-        "%s [-t toolsVersion] src.vmdk dst.vmdk: converts source disk to destination disk with given tools version\n\n",
-        cmd);
-
-    return 1;
-}
-
-/* Check a string is number */
-static bool isNumber(char *text) {
-    int j;
-    j = strlen(text);
-    while (j--) {
-        if (text[j] >= '0' && text[j] <= '9')
-            continue;
-
-        return false;
-    }
-    return true;
-}
-
 int main(int argc, char *argv[]) {
+    CommandLineArgs args = {
+        .tools_version = "2147483647",  // default is 2^31-1 (unknown)
+        .do_convert_zbs = false,
+        .do_convert_local = false,
+        .do_info = false,
+        .dest_file_path = "dest.vmdk",
+        .src_file_path = "",
+        .dest_ip = "",
+        .dest_volume_uuid = "",
+        .src_ip = "",
+        .src_volume_uuid = "",
+    };
     struct timeval tv;
     DiskInfo *di;
-    const char *src;
-    int opt;
-    bool doInfo = false;
-    bool doConvert = false;
 
     gettimeofday(&tv, NULL);
     srand48(tv.tv_sec ^ tv.tv_usec);
 
-    while ((opt = getopt(argc, argv, "it:")) != -1) {
-        switch (opt) {
-            case 'i':
-                doInfo = true;
-                break;
-            case 't':
-                doConvert = true;
-                toolsVersion = optarg;
-                if (!isNumber(toolsVersion)) {
-                    fprintf(stderr, "Invalid tools version: %s\n", toolsVersion);
-                    exit(1);
-                }
-                break;
-            case '?':
-                printUsage(argv[0]);
-                exit(1);
-        }
-    }
-
-    if (doInfo && doConvert) {
-        printUsage(argv[0]);
+    if (parse_args(argc, argv, args) != 0) {
         exit(1);
     }
 
-    if (optind >= argc) {
-        src = "src.vmdk";
-    } else {
-        src = argv[optind++];
-    }
-    di = Sparse_Open(src);
+    di = Sparse_Open(args.src_file_path);
     if (di == NULL) {
-        di = Flat_Open(src);
+        di = Flat_Open(args.src_file_path);
     }
     if (di == NULL) {
-        fprintf(stderr, "Cannot open source disk %s: %s\n", src, strerror(errno));
+        fprintf(stderr, "Cannot open source disk %s: %s\n", args.src_file_path, strerror(errno));
     } else {
-        if (doInfo) {
+        if (args.do_info) {
             off_t capacity = di->vmt->getCapacity(di);
             off_t end = 0;
             off_t pos;
@@ -158,26 +114,20 @@ int main(int argc, char *argv[]) {
             printf("{ \"capacity\": %llu, \"used\": %llu }\n", (unsigned long long)capacity,
                    (unsigned long long)usedSpace);
         } else {
-            const char *filename;
             DiskInfo *tgt;
             off_t capacity;
 
-            if (optind >= argc) {
-                filename = "dst.vmdk";
-            } else {
-                filename = argv[optind++];
-            }
             capacity = di->vmt->getCapacity(di);
 
-            if (strcmp(&(filename[strlen(filename) - 5]), ".vmdk") == 0)
-                tgt = StreamOptimized_Create(filename, capacity);
+            if (strcmp(&(args.dest_file_path[strlen(args.dest_file_path) - 5]), ".vmdk") == 0)
+                tgt = StreamOptimized_Create(args.dest_file_path, capacity);
             else
-                tgt = Flat_Create(filename, capacity);
+                tgt = Flat_Create(args.dest_file_path, capacity);
 
             if (tgt == NULL) {
-                fprintf(stderr, "Cannot open target disk %s: %s\n", filename, strerror(errno));
+                fprintf(stderr, "Cannot open target disk %s: %s\n", args.dest_file_path, strerror(errno));
             } else {
-                printf("Starting to convert %s to %s...\n", src, filename);
+                printf("Starting to convert %s to %s...\n", args.src_file_path, args.dest_file_path);
                 if (copyDisk(di, tgt)) {
                     printf("Success\n");
                 } else {

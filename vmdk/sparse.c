@@ -156,7 +156,7 @@ static char *makeDiskDescriptorFile(const char *fileName, uint64_t capacity, uin
         cylinders = CEILING(capacity, 255 * 63);
     }
     if (asprintf(&ret, ddfTemplate, cid, (long long int)capacity, fileName, (uint32_t)mrand48(), (uint32_t)mrand48(),
-                 (uint32_t)mrand48(), cid, cylinders, toolsVersion) == -1) {
+                 (uint32_t)mrand48(), cid, cylinders, "2147483647") == -1) {
         return NULL;
     }
     return ret;
