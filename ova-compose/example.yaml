@@ -1,9 +1,9 @@
 system:
     name: example
-    type: vmx-17
+    type: vmx-21
     os_vmw: !param os=other4xLinux64Guest
     firmware: !param firmware=efi
-    secure_boot: !param secure-boot=true
+    secure_boot: !param secure-boot=false
 
 networks:
     vm_network:
@@ -17,19 +17,19 @@ hardware:
         type: sata_controller
     scsi1:
         type: scsi_controller
+    nvme1:
+        type: nvme_controller
     cdrom1:
         type: cd_drive
         parent: sata1
-    floppy1:
-        type: floppy
-        image: floppy.img
-        connected: true
     rootdisk:
         type: hard_disk
-        parent: scsi1
+        parent: nvme1
         disk_image: !param rootdisk
-    usb1:
+    usb2:
         type: usb_controller
+    usb3:
+        type: usb3_controller
     ethernet1:
         type: ethernet
         subtype: VmxNet3
@@ -45,6 +45,3 @@ product:
 
 annotation:
     text: the password is top secret
-
-eula:
-    file: !param eulafile
