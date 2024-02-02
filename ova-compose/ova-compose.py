@@ -1170,7 +1170,7 @@ def main():
     do_quiet = False
     do_manifest = False
     params = {}
-    checksum_type = "sha512"
+    checksum_type = "sha256"
 
     try:
         opts, args = getopt.getopt(sys.argv[1:], 'f:hi:mo:q', longopts=['format=', 'input-file=', 'manifest', 'output-file=', 'param=', 'checksum-type='])
