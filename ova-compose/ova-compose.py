@@ -816,6 +816,37 @@ class VmwExtraConfigItem(object):
         return elem
 
 
+class VmwIPAssignmentSettings(object):
+
+    def __init__(self, protocols, schemes=None, required=False):
+        self.protocols = protocols
+        self.schemes = schemes
+        self.required = required
+
+
+    @classmethod
+    def from_dict(cls, d):
+        item = cls(**d)
+        return item
+
+
+    def xml_item(self):
+        protocols = self.protocols
+        if type(protocols) is list:
+            protocols = ",".join(protocols)
+
+        schemes = self.schemes
+        if type(schemes) is list:
+            schemes = ",".join(schemes)
+
+        attrs = {'{%s}protocols' % NS_VMW: protocols}
+        if schemes is not None:
+            attrs['{%s}schemes' % NS_VMW] = schemes
+        attrs['{%s}required' % NS_VMW] = "true" if self.required else "false"
+        elem = ET.Element('{%s}IpAssignmentSection' % NS_VMW, attrs)
+        return elem
+
+
 class OVF(object):
 
     CONFIG_DEFAULTS = {
@@ -847,7 +878,7 @@ class OVF(object):
                  networks,
                  vssd_system, rasd_items, extra_configs,
                  product, annotation, eula,
-                 configurations):
+                 configurations, ip_assignment_settings):
         self.hardware_config = {}
         if not system.get('no_default_configs', False):
             self.hardware_config.update(OVF.CONFIG_DEFAULTS)
@@ -872,6 +903,7 @@ class OVF(object):
         self.annotation = annotation
         self.eula = eula
         self.configurations = configurations
+        self.ip_assignment_settings = ip_assignment_settings
 
         if 'default_configuration' in system:
             dflt_cfg = system['default_configuration']
@@ -943,10 +975,14 @@ class OVF(object):
             for k, v in config['configurations'].items():
                 configurations[k] = OVFConfiguration(k, **v)
 
+        ip_assignment_settings = None
+        if 'ip_assignment_settings' in config:
+            ip_assignment_settings = VmwIPAssignmentSettings.from_dict(config['ip_assignment_settings'])
+
         ovf = cls(config['system'], files, disks,
                   networks, vssd_system, rasd_items, extra_configs,
                   product, annotation, eula,
-                  configurations)
+                  configurations, ip_assignment_settings)
 
         return ovf
 
@@ -1028,6 +1064,11 @@ class OVF(object):
         for nw_id, nw in self.networks.items():
             network_section.append(nw.xml_item())        
         envelope.append(network_section)
+
+        if self.ip_assignment_settings:
+            ipassign = self.ip_assignment_settings.xml_item()
+            ipassign.append(xml_text_element('{%s}Info' % NS_OVF, "Supported IP assignment schemes"))
+            envelope.append(ipassign)
 
         # VirtualSystem
         virtual_system = ET.Element('{%s}VirtualSystem' % NS_OVF, { '{%s}id' % NS_OVF: 'vm' })
@@ -1150,7 +1191,7 @@ def yaml_param(loader, node):
     default = None
     key = node.value
 
-    assert type(key) is str, f"param name must be a string"
+    assert type(key) is str, "param name must be a string"
 
     if '=' in key:
         key, default = [t.strip() for t in key.split('=', maxsplit=1)]
