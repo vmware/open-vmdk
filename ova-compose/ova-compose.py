@@ -554,14 +554,42 @@ class OVFFile(object):
 class OVFDisk(object):
     next_id = 0
 
+    allocation_units_map = {
+            'byte' : "byte",
+            'KB' : "byte * 2^10",
+            'MB' : "byte * 2^20",
+            'GB' : "byte * 2^30",
+            'TB' : "byte * 2^40",
+        }
 
-    def __init__(self, path):
+    allocation_factors = {
+            'byte' : 1,
+            'byte * 2^10' : 2 ** 10,
+            'byte * 2^20' : 2 ** 20,
+            'byte * 2^30' : 2 ** 30,
+            'byte * 2^40' : 2 ** 40,
+    }
+
+    def __init__(self, path, units=None):
         self.id = f"vmdisk{OVFDisk.next_id}"
         OVFDisk.next_id += 1
         self.file = OVFFile(path)
 
+        # units can be unspecified (default: byte),
+        # one of KB, MB, ...
+        # or byte * 2^10, ... with exponents 10-40
+        if units is None:
+            units = "byte"
+        elif units in self.allocation_units_map:
+            units = self.allocation_units_map[units]
+        elif units in self.allocation_factors:
+            pass
+        else:
+            assert False, "invalid units used"
+        self.units = units
+
         disk_info = OVF._disk_info(path)
-        self.capacity = disk_info['capacity']
+        self.capacity = int(disk_info['capacity'] / self.allocation_factors[self.units])
         self.used = disk_info['used']
 
 
@@ -572,7 +600,7 @@ class OVFDisk(object):
     def xml_item(self):
         return ET.Element('{%s}Disk' % NS_OVF, {
             '{%s}capacity' % NS_OVF: str(self.capacity),
-            '{%s}capacityAllocationUnits' % NS_OVF: 'byte',
+            '{%s}capacityAllocationUnits' % NS_OVF: self.units,
             '{%s}diskId' % NS_OVF: self.id,
             '{%s}fileRef' % NS_OVF: self.file.id,
             '{%s}populatedSize' % NS_OVF: str(self.used),
@@ -581,18 +609,13 @@ class OVFDisk(object):
 
 
 class OVFEmptyDisk(OVFDisk):
+
     def __init__(self, capacity, units="MB"):
         self.id = f"vmdisk{OVFDisk.next_id}"
         OVFDisk.next_id += 1
         self.capacity = capacity
-        if units == "KB":
-            units = "byte * 2^10"
-        elif units == "MB":
-            units = "byte * 2^20"
-        elif units == "GB":
-            units = "byte * 2^30"
-        elif units == "TB":
-            units = "byte * 2^30"
+        if units in self.allocation_units_map:
+            units = self.allocation_units_map[units]
         self.units = units
 
 
@@ -908,7 +931,7 @@ class OVF(object):
                     files.append(file)
                     hw['image'] = file
                 elif 'disk_image' in hw:
-                    disk = OVFDisk(hw['disk_image'])
+                    disk = OVFDisk(hw['disk_image'], units=hw.get('units', None))
                     disks.append(disk)
                     files.append(disk.file)
                     hw['disk'] = disk
