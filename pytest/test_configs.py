@@ -60,11 +60,11 @@ def test_configs(in_yaml):
         ovf = xmltodict.parse(f.read())
 
     cfg_system = config['system']
-    assert cfg_system['name'] == ovf['ovf:Envelope']['ovf:VirtualSystem']['ovf:Name']
-    assert cfg_system['os_vmw'] == ovf['ovf:Envelope']['ovf:VirtualSystem']['ovf:OperatingSystemSection']['@vmw:osType']
-    assert cfg_system['type'] == ovf['ovf:Envelope']['ovf:VirtualSystem']['ovf:VirtualHardwareSection']['ovf:System']['vssd:VirtualSystemType']
+    assert cfg_system['name'] == ovf['Envelope']['VirtualSystem']['Name']
+    assert cfg_system['os_vmw'] == ovf['Envelope']['VirtualSystem']['OperatingSystemSection']['@vmw:osType']
+    assert cfg_system['type'] == ovf['Envelope']['VirtualSystem']['VirtualHardwareSection']['System']['vssd:VirtualSystemType']
 
-    vmw_configs = ovf['ovf:Envelope']['ovf:VirtualSystem']['ovf:VirtualHardwareSection']['vmw:Config']
+    vmw_configs = ovf['Envelope']['VirtualSystem']['VirtualHardwareSection']['vmw:Config']
 
     # TODO: check if default is set to bios unless no_default_configs is set
     if 'firmware' in cfg_system:

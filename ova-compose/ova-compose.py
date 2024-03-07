@@ -36,6 +36,7 @@ NS_VSSD = "http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_VirtualSystemSe
 NS_XSI = "http://www.w3.org/2001/XMLSchema-instance"
 
 NS_MAP = {
+    None: NS_OVF,
     "cim" : NS_CIM,
     "ovf" : NS_OVF,
     "rasd" : NS_RASD,
