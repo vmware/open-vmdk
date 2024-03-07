@@ -617,7 +617,7 @@ class OVFProperty(object):
                  label=None, description=None, category=None):
         self.key = key
         self.type = type
-        self.password = False
+        self.password = password
         self.value = value
         self.user_configurable = user_configurable
         self.qualifiers = qualifiers
