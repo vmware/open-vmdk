@@ -27,7 +27,7 @@ VMDK_CONVERT=os.path.join(THIS_DIR, "..", "build", "vmdk", "vmdk-convert")
 
 CONFIG_DIR=os.path.join(THIS_DIR, "configs")
 
-WORK_DIR=os.path.join(os.getcwd(), "pytest-tmp")
+WORK_DIR=os.path.join(os.getcwd(), "pytest-configs")
 
 
 @pytest.fixture(scope='module', autouse=True)
@@ -42,7 +42,7 @@ def setup_test():
 
     yield
     shutil.rmtree(WORK_DIR)
-    
+
 
 @pytest.mark.parametrize("in_yaml", glob.glob(os.path.join(CONFIG_DIR, "*.yaml")))
 def test_configs(in_yaml):
