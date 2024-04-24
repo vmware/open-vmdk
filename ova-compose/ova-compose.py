@@ -531,11 +531,13 @@ class OVFNetwork(object):
 class OVFFile(object):
     next_id = 0
 
-
-    def __init__(self, path):
-        self.id = f"file{OVFFile.next_id}"
-        OVFFile.next_id += 1
-        self.path = os.path.abspath(path)
+    def __init__(self, path, file_id=None):
+        self.path = os.path.basename(path)
+        if file_id is None:
+            self.id = f"file{OVFFile.next_id}"
+            OVFFile.next_id += 1
+        else:
+            self.id = file_id
         self.size = os.path.getsize(self.path)
 
 
@@ -570,10 +572,15 @@ class OVFDisk(object):
             'byte * 2^40' : 2 ** 40,
     }
 
-    def __init__(self, path, units=None):
-        self.id = f"vmdisk{OVFDisk.next_id}"
-        OVFDisk.next_id += 1
-        self.file = OVFFile(path)
+
+    def __init__(self, path, units=None, disk_id=None, file_id=None):
+        if disk_id is None:
+            self.id = f"vmdisk{OVFDisk.next_id}"
+            OVFDisk.next_id += 1
+        else:
+            self.id = disk_id
+
+        self.file = OVFFile(path, file_id=file_id)
 
         # units can be unspecified (default: byte),
         # one of KB, MB, ...
@@ -599,9 +606,9 @@ class OVFDisk(object):
 
     def xml_item(self):
         return ET.Element('{%s}Disk' % NS_OVF, {
+            '{%s}diskId' % NS_OVF: self.id,
             '{%s}capacity' % NS_OVF: str(self.capacity),
             '{%s}capacityAllocationUnits' % NS_OVF: self.units,
-            '{%s}diskId' % NS_OVF: self.id,
             '{%s}fileRef' % NS_OVF: self.file.id,
             '{%s}populatedSize' % NS_OVF: str(self.used),
             '{%s}format' % NS_OVF: 'http://www.vmware.com/interfaces/specifications/vmdk.html#streamOptimized'
@@ -610,9 +617,12 @@ class OVFDisk(object):
 
 class OVFEmptyDisk(OVFDisk):
 
-    def __init__(self, capacity, units="MB"):
-        self.id = f"vmdisk{OVFDisk.next_id}"
-        OVFDisk.next_id += 1
+    def __init__(self, capacity, units="MB", disk_id=None):
+        if disk_id is None:
+            self.id = f"vmdisk{OVFDisk.next_id}"
+            OVFDisk.next_id += 1
+        else:
+            self.id = disk_id
         self.capacity = capacity
         if units in self.allocation_units_map:
             units = self.allocation_units_map[units]
@@ -927,16 +937,21 @@ class OVF(object):
         for hw_id, hw in hardware.items():
             if isinstance(hw, dict):
                 if 'image' in hw:
-                    file = OVFFile(hw['image'])
+                    file = OVFFile(hw['image'],
+                                   file_id=hw.get('file_id', None))
                     files.append(file)
                     hw['image'] = file
                 elif 'disk_image' in hw:
-                    disk = OVFDisk(hw['disk_image'], units=hw.get('units', None))
+                    disk = OVFDisk(hw['disk_image'],
+                                   units=hw.get('units', None),
+                                   disk_id=hw.get('disk_id', None),
+                                   file_id=hw.get('file_id', None))
                     disks.append(disk)
                     files.append(disk.file)
                     hw['disk'] = disk
                 elif 'disk_capacity' in hw:
-                    disk = OVFEmptyDisk(hw['disk_capacity'])
+                    disk = OVFEmptyDisk(hw['disk_capacity'],
+                                        disk_id=hw.get('disk_id', None))
                     disks.append(disk)
                     hw['disk'] = disk
 

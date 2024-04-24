@@ -28,7 +28,7 @@ VMDK_CONVERT=os.path.join(THIS_DIR, "..", "build", "vmdk", "vmdk-convert")
 
 CONFIG_DIR=os.path.join(THIS_DIR, "configs")
 
-WORK_DIR=os.path.join(os.getcwd(), "pytest-tmp")
+WORK_DIR=os.path.join(os.getcwd(), "pytest-manifest")
 
 
 @pytest.fixture(scope='module', autouse=True)
