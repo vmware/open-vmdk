@@ -1160,10 +1160,14 @@ class OVF(object):
 
 
     @staticmethod
-    def _get_hash(filename, hash_type):
+    def _get_hash(filename, hash_type, blocksz=1024 * 1024):
         hash = hashlib.new(hash_type)
         with open(filename, "rb") as f:
-            hash.update(f.read())
+            while True:
+                buf = f.read(blocksz)
+                if not buf:
+                    break
+                hash.update(buf)
         return hash.hexdigest()
 
 
