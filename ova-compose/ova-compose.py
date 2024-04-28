@@ -1191,7 +1191,7 @@ def usage():
     print("  -o, --output-file <file>    output file or directory name")
     print("  -f, --format ova|ovf|dir    output format")
     print("  -m, --manifest              create manifest file along with ovf (default true for output formats ova and dir)")
-    print("  --checksum-type sha256|sha512  set the checksum type for the manifest. Must be sha256 or sha512.")
+    print("  --checksum-type sha1|sha256|sha512  set the checksum type for the manifest. Must be sha1, sha256 or sha512.")
     print("  -q                          quiet mode")
     print("  -h                          print help")
     print("")
@@ -1264,7 +1264,7 @@ def main():
     assert config_file != None, "no input file specified"
     assert output_file != None, "no output file/directory specified"
 
-    assert checksum_type in ["sha512", "sha256"], f"checksum-type '{checksum_type}' is invalid"
+    assert checksum_type in ["sha1", "sha512", "sha256"], f"checksum-type '{checksum_type}' is invalid"
 
     if config_file != None:
         f = open(config_file, 'r')

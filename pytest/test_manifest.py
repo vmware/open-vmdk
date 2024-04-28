@@ -61,7 +61,7 @@ def check_mf(mf_path, hash_type, work_dir=WORK_DIR):
             assert hash.hexdigest() == hash_mf
 
 
-@pytest.mark.parametrize("hash_type", [None, "sha256", "sha512"])
+@pytest.mark.parametrize("hash_type", [None, "sha1", "sha256", "sha512"])
 def test_ovf_manifest(hash_type):
     in_yaml = os.path.join(CONFIG_DIR, "basic.yaml")
     basename = os.path.basename(in_yaml.rsplit(".", 1)[0])
@@ -82,7 +82,7 @@ def test_ovf_manifest(hash_type):
     check_mf(out_mf, hash_type)
 
 
-@pytest.mark.parametrize("hash_type", [None, "sha256", "sha512"])
+@pytest.mark.parametrize("hash_type", [None, "sha1", "sha256", "sha512"])
 def test_ova_manifest(hash_type):
     in_yaml = os.path.join(CONFIG_DIR, "basic.yaml")
     basename = os.path.basename(in_yaml.rsplit(".", 1)[0])
