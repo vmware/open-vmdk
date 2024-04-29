@@ -572,15 +572,12 @@ class OVFDisk(object):
             'byte * 2^40' : 2 ** 40,
     }
 
-
-    def __init__(self, path, units=None, disk_id=None, file_id=None):
+    def __init__(self, path, units=None, disk_id=None, file_id=None, raw_image=None):
         if disk_id is None:
             self.id = f"vmdisk{OVFDisk.next_id}"
             OVFDisk.next_id += 1
         else:
             self.id = disk_id
-
-        self.file = OVFFile(path, file_id=file_id)
 
         # units can be unspecified (default: byte),
         # one of KB, MB, ...
@@ -595,6 +592,16 @@ class OVFDisk(object):
             assert False, "invalid units used"
         self.units = units
 
+        if raw_image is not None:
+            if os.path.exists(raw_image):
+                # check if the vmdk exists, and if it does if it's newer than the raw image
+                # if not, create vmdk from raw image
+                if not os.path.exists(path) or os.path.getctime(raw_image) > os.path.getctime(path):
+                    subprocess.check_call(['vmdk-convert', raw_image, path])
+            else:
+                print(f"warning: raw image file {raw_image} does not exist, using {path}")
+
+        self.file = OVFFile(path)
         disk_info = OVF._disk_info(path)
         self.capacity = int(disk_info['capacity'] / self.allocation_factors[self.units])
         self.used = disk_info['used']
@@ -941,9 +948,13 @@ class OVF(object):
                                    file_id=hw.get('file_id', None))
                     files.append(file)
                     hw['image'] = file
-                elif 'disk_image' in hw:
+                elif 'disk_image' in hw or 'raw_image' in hw:
+                    if 'disk_image' not in hw:
+                        # if vmdk file is unset, use the raw image name and replace the extension
+                        hw['disk_image'] = os.path.splitext(hw['raw_image'])[0] + ".vmdk"
                     disk = OVFDisk(hw['disk_image'],
                                    units=hw.get('units', None),
+                                   raw_image=hw.get('raw_image', None),
                                    disk_id=hw.get('disk_id', None),
                                    file_id=hw.get('file_id', None))
                     disks.append(disk)
