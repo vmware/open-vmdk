@@ -37,8 +37,8 @@ struct options {
 
 #define OPTION(t, p) { t, offsetof(struct options, p), 1 }
 static const struct fuse_opt option_spec[] = {
-                OPTION("--file=%s", vmdk_path),
-                FUSE_OPT_END
+    OPTION("--file=%s", vmdk_path),
+    FUSE_OPT_END
 };
 
 struct vmdk_data {
@@ -174,6 +174,23 @@ int vmdk_init(struct vmdk_data *data)
     return 0;
 }
 
+static
+int vmdk_opt_proc(void *data, const char *arg,
+			      int key, struct fuse_args *outargs)
+{
+    struct vmdk_data *vmdk_data = (struct vmdk_data *)data;
+
+	switch (key) {
+	case FUSE_OPT_KEY_NONOPT:
+        if (vmdk_data->options.vmdk_path == NULL) {
+            vmdk_data->options.vmdk_path = strdup(arg);
+            return 0;
+        }
+        return 1;
+    }
+    return 1;
+}
+
 int main(int argc, char *argv[])
 {
 	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
@@ -182,7 +199,7 @@ int main(int argc, char *argv[])
     int argc_saved;
     char **argv_saved;
 
-    if (fuse_opt_parse(&args, &data.options, option_spec, NULL) == -1)
+    if (fuse_opt_parse(&args, &data, option_spec, vmdk_opt_proc) == -1)
             return 1;
 
     if (!data.options.vmdk_path) {
