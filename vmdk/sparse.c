@@ -686,8 +686,6 @@ typedef struct {
 	DiskInfo hdr;
 	SparseExtentHeader diskHdr;
 	SparseGTInfo gtInfo;
-	uint8_t *readBuffer;
-	uint8_t *grainBuffer;
 	size_t readBufferSize;
 	z_stream zstream;
 	int fd;
@@ -791,8 +789,15 @@ SparsePread(DiskInfo *self,
 {
 	SparseDiskInfo *sdi = getSDI(self);
 	uint8_t *buf8 = buf;
+	uint8_t grainBuf[sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE];
+	uint8_t readBuf[(sdi->diskHdr.grainSize + 1) * VMDK_SECTOR_SIZE];
+	z_stream zstream = {0};
 	uint32_t grainNr = pos / (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE);
 	uint32_t readSkip = pos & (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE - 1);
+
+	if (inflateInit(&zstream) != Z_OK) {
+		return -1;
+	}
 
 	while (len > 0) {
 		uint32_t readLen;
@@ -824,11 +829,11 @@ SparsePread(DiskInfo *self,
 				uint32_t hdrlen;
 				uint32_t cmpSize;
 
-				if (!safePread(sdi->fd, sdi->readBuffer, VMDK_SECTOR_SIZE, sect * VMDK_SECTOR_SIZE)) {
+				if (!safePread(sdi->fd, readBuf, VMDK_SECTOR_SIZE, sect * VMDK_SECTOR_SIZE)) {
 					return -1;
 				}
 				if (sdi->diskHdr.flags & SPARSEFLAG_EMBEDDED_LBA) {
-					SparseGrainLBAHeaderOnDisk *hdr = (SparseGrainLBAHeaderOnDisk *)sdi->readBuffer;
+					SparseGrainLBAHeaderOnDisk *hdr = (SparseGrainLBAHeaderOnDisk *)readBuf;
 
 					if (__le64_to_cpu(hdr->lba) != grainNr * sdi->diskHdr.grainSize) {
 						return -1;
@@ -836,33 +841,30 @@ SparsePread(DiskInfo *self,
 					cmpSize = __le32_to_cpu(hdr->cmpSize);
 					hdrlen = 12;
 				} else {
-					cmpSize = __le32_to_cpu(*(__le32*)sdi->readBuffer);
+					cmpSize = __le32_to_cpu(*(__le32*)readBuf);
 					hdrlen = 4;
 				}
-				if (cmpSize > sdi->readBufferSize - hdrlen) {
+				if (cmpSize > sizeof readBuf - hdrlen) {
 					return -1;
 				}
 				if (cmpSize + hdrlen > VMDK_SECTOR_SIZE) {
 					size_t remainingLength = (cmpSize + hdrlen - VMDK_SECTOR_SIZE + VMDK_SECTOR_SIZE - 1) & ~(VMDK_SECTOR_SIZE - 1);
 
-					if (!safePread(sdi->fd, sdi->readBuffer + VMDK_SECTOR_SIZE, remainingLength, (sect + 1) * VMDK_SECTOR_SIZE)) {
+					if (!safePread(sdi->fd, readBuf + VMDK_SECTOR_SIZE, remainingLength, (sect + 1) * VMDK_SECTOR_SIZE)) {
 						return -1;
 					}
 				}
-				if (inflateReset(&sdi->zstream) != Z_OK) {
+				zstream.next_in = readBuf + hdrlen;
+				zstream.avail_in = cmpSize;
+				zstream.next_out = grainBuf;
+				zstream.avail_out = sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE;
+				if (inflate(&zstream, Z_FINISH) != Z_STREAM_END) {
 					return -1;
 				}
-				sdi->zstream.next_in = sdi->readBuffer + hdrlen;
-				sdi->zstream.avail_in = cmpSize;
-				sdi->zstream.next_out = sdi->grainBuffer;
-				sdi->zstream.avail_out = sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE;
-				if (inflate(&sdi->zstream, Z_FINISH) != Z_STREAM_END) {
+				if (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE - zstream.avail_out < grainSize) {
 					return -1;
 				}
-				if (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE - sdi->zstream.avail_out < grainSize) {
-					return -1;
-				}
-				memcpy(buf8, sdi->grainBuffer + readSkip, readLen);
+				memcpy(buf8, grainBuf + readSkip, readLen);
 			} else {
 				if (!safePread(sdi->fd, buf8, readLen, sect * VMDK_SECTOR_SIZE + readSkip)) {
 					return -1;
@@ -873,6 +875,11 @@ SparsePread(DiskInfo *self,
 		len -= readLen;
 		grainNr++;
 		readSkip = 0;
+		if (len > 0) {
+			if (inflateReset(&zstream) != Z_OK) {
+				return -1;
+			}
+		}
 	}
 	return buf8 - (uint8_t *)buf;
 }
@@ -883,10 +890,6 @@ SparseClose(DiskInfo *self)
 	SparseDiskInfo *sdi = getSDI(self);
 	int fd;
 
-	if (sdi->readBuffer) {
-		inflateEnd(&sdi->zstream);
-		free(sdi->readBuffer);
-	}
 	free(sdi->gtInfo.gd);
 	fd = sdi->fd;
 	free(sdi);
@@ -936,12 +939,7 @@ Sparse_Open(const char *fileName)
 		goto failSdi;
 	}
 	if (sdi->diskHdr.flags & SPARSEFLAG_COMPRESSED) {
-		sdi->readBuffer = malloc((sdi->diskHdr.grainSize * 2 + 1) * VMDK_SECTOR_SIZE);
-		if (sdi->readBuffer == NULL) {
-			goto failGDGT;
-		}
 		sdi->readBufferSize = (sdi->diskHdr.grainSize + 1) * VMDK_SECTOR_SIZE;
-		sdi->grainBuffer = sdi->readBuffer + sdi->readBufferSize;
 		sdi->zstream.zalloc = NULL;
 		sdi->zstream.zfree = NULL;
 		sdi->zstream.opaque = sdi;
@@ -970,13 +968,7 @@ Sparse_Open(const char *fileName)
 	return &sdi->hdr;
 
 failDF:
-	if (sdi->readBuffer) {
-		inflateEnd(&sdi->zstream);
-	}
 failRB:
-	free(sdi->readBuffer);
-failGDGT:
-	free(sdi->gtInfo.gd);
 failSdi:
 	free(sdi);
 failFd:

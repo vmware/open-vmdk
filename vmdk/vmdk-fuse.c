@@ -127,11 +127,13 @@ static int vmdk_read(const char *path, char *buf, size_t size,
     if (di == NULL)
         return -EIO;
 
-    if (di->vmt->pread(di, (void *)buf, size, offset) != (ssize_t)size) {
+    ssize_t ret;
+    if ((ret = di->vmt->pread(di, (void *)buf, size, offset)) < 0) {
+        fprintf(stderr, "pread failed: %d (%s)\n", errno, strerror(errno));
         return -EIO;
     }
 
-    return size;
+    return ret;
 }
 
 static int vmdk_write(const char *path, const char *buf, size_t size,
@@ -210,6 +212,5 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    printf("before fuse_main\n");
     return fuse_main(argc_saved, argv_saved, &vmdk_oper, (void *)&data);
 }
