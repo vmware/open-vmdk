@@ -87,6 +87,12 @@ fi
 vmdks=$@
 vmdks_num=$#
 
+if ! which vmdk-convert > /dev/null ; then
+    echo "vmdk-convert not found in PATH."
+    echo "Terminating." >&2
+    exit 1
+fi
+
 echo "Starting to create ${name}.ova with ${vmdks_num} disk(s) with template ${ovftempl}"
 echo "Number of CPUs: ${NUM_CPUS}"
 echo "Memory in MB: ${MEM_SIZE}"
