@@ -26,7 +26,6 @@ import tempfile
 import shutil
 from concurrent.futures import ProcessPoolExecutor
 
-
 APP_NAME = "ova-compose"
 
 VMDK_CONVERT = "vmdk-convert"
@@ -1294,6 +1293,29 @@ class OVF(object):
                 f.write(f"{hash_type.upper()}({fname})= {hash}\n")
 
 
+    def sign_manifest(self, keyfile, ovf_file=None, mf_file=None, sign_alg="sha512"):
+        if ovf_file == None:
+            ovf_file = f"{self.name}.ovf"
+        if mf_file == None:
+            mf_file = f"{self.name}.mf"
+        cert_file = os.path.splitext(ovf_file)[0] + ".cert"
+
+        with open(cert_file, "wt") as f:
+            signature = subprocess.check_output(["openssl", "dgst", f"-{sign_alg}", "-sign", keyfile, "-out", "-", mf_file])
+            f.write(f"{sign_alg.upper()}({mf_file})= {signature.hex()}\n")
+
+            with open(keyfile, "rt") as fin:
+                do_copy = False
+                for line in fin:
+                    if (line.startswith("-----BEGIN CERTIFICATE")):
+                        do_copy = True
+                    if do_copy:
+                        f.write(line)
+                    if (line.startswith("-----END CERTIFICATE")):
+                        break
+                assert do_copy, f"no certificate found in {keyfile}"
+
+
 def usage():
     print(f"Usage: {sys.argv[0]} -i|--input-file <input file> -o|--output-file <output file> [--format ova|ovf|dir] [-q] [-h]")
     print("")
@@ -1322,7 +1344,7 @@ def yaml_param(loader, node):
     default = None
     key = node.value
 
-    assert type(key) is str, f"param name must be a string"
+    assert type(key) is str, f"param name {key} must be a string"
 
     if '=' in key:
         key, default = [t.strip() for t in key.split('=', maxsplit=1)]
@@ -1343,10 +1365,14 @@ def main():
     do_manifest = False
     params = {}
     checksum_type = "sha256"
+    sign_keyfile = None
+    sign_alg = None
     tar_format = "gnu"
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:], 'f:hi:mo:q', longopts=['format=', 'input-file=', 'manifest', 'output-file=', 'param=', 'checksum-type=', 'tar-format=', 'vmdk-convert='])
+        opts, args = getopt.getopt(sys.argv[1:],
+            'f:hi:mo:q',
+            longopts=['format=', 'input-file=', 'manifest', 'output-file=', 'param=', 'checksum-type=', 'sign=', 'sign-alg=', 'tar-format=', 'vmdk-convert='])
     except:
         print ("invalid option")
         sys.exit(2)
@@ -1372,6 +1398,10 @@ def main():
             VMDK_CONVERT = a
         elif o in ['-q']:
             do_quiet = True
+        elif o in ['-s', '--sign']:
+            sign_keyfile = a
+        elif o in ['--sign-alg']:
+            sign_alg = a
         elif o in ['-h']:
             usage()
             sys.exit(0)
@@ -1382,6 +1412,12 @@ def main():
     assert output_file != None, "no output file/directory specified"
 
     assert checksum_type in ["sha1", "sha512", "sha256"], f"checksum-type '{checksum_type}' is invalid"
+    if sign_alg is None:
+        sign_alg = checksum_type
+    assert sign_alg in ["sha1", "sha512", "sha256"], f"checksum-type '{sign_alg}' is invalid"
+
+    if sign_keyfile is not None:
+        sign_keyfile = os.path.abspath(sign_keyfile)
 
     if config_file != None:
         f = open(config_file, 'r')
@@ -1421,6 +1457,8 @@ def main():
         ovf.write_xml(ovf_file=ovf_file)
         if do_manifest:
             ovf.write_manifest(ovf_file=ovf_file, mf_file=mf_file, hash_type=checksum_type)
+            if sign_keyfile is not None:
+                ovf.sign_manifest(sign_keyfile, ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg)
     elif output_format == "ova" or output_format == "dir":
         pwd = os.getcwd()
         tmpdir = tempfile.mkdtemp(prefix=f"{basename}-", dir=pwd)
@@ -1436,6 +1474,10 @@ def main():
                 all_files.append(dst)
 
             ovf.write_manifest(ovf_file=ovf_file, mf_file=mf_file, hash_type=checksum_type)
+            if sign_keyfile is not None:
+                ovf.sign_manifest(sign_keyfile, ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg)
+                cert_file = os.path.splitext(ovf_file)[0] + ".cert"
+                all_files.append(cert_file)
 
             if output_format == "ova":
                 ret = subprocess.check_call(["tar", f"--format={tar_format}", "-h",
