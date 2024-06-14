@@ -532,7 +532,7 @@ class OVFFile(object):
     next_id = 0
 
     def __init__(self, path, file_id=None):
-        self.path = os.path.basename(path)
+        self.path = os.path.abspath(path)
         if file_id is None:
             self.id = f"file{OVFFile.next_id}"
             OVFFile.next_id += 1
