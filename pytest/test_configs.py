@@ -44,6 +44,23 @@ def setup_test():
     shutil.rmtree(WORK_DIR)
 
 
+def yaml_param(loader, node):
+    params = loader.app_params
+    default = None
+    key = node.value
+
+    assert type(key) is str, f"param name must be a string"
+
+    if '=' in key:
+        key, default = [t.strip() for t in key.split('=', maxsplit=1)]
+        default = yaml.safe_load(default)
+    value = params.get(key, default)
+
+    assert value is not None, f"no param set for '{key}', and there is no default"
+
+    return value
+
+
 @pytest.mark.parametrize("in_yaml", glob.glob(os.path.join(CONFIG_DIR, "*.yaml")))
 def test_configs(in_yaml):
     basename = os.path.basename(in_yaml.rsplit(".", 1)[0])
@@ -54,6 +71,8 @@ def test_configs(in_yaml):
 
     with open(in_yaml) as f:
         yaml_loader = yaml.SafeLoader
+        yaml_loader.app_params = {}
+        yaml.add_constructor("!param", yaml_param, Loader=yaml_loader)
         config = yaml.load(f, Loader=yaml_loader)
 
     with open(out_ovf) as f:
