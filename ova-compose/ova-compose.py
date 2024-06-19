@@ -1247,9 +1247,10 @@ def main():
     do_manifest = False
     params = {}
     checksum_type = "sha256"
+    tar_format = "ustar"
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:], 'f:hi:mo:q', longopts=['format=', 'input-file=', 'manifest', 'output-file=', 'param=', 'checksum-type='])
+        opts, args = getopt.getopt(sys.argv[1:], 'f:hi:mo:q', longopts=['format=', 'input-file=', 'manifest', 'output-file=', 'param=', 'checksum-type=', 'tar-format='])
     except:
         print ("invalid option")
         sys.exit(2)
@@ -1268,6 +1269,8 @@ def main():
         elif o in ['--param']:
             k,v = a.split('=', maxsplit=1)
             params[k] = yaml.safe_load(v)
+        elif o in ['--tar-format']:
+            tar_format = a
         elif o in ['-q']:
             do_quiet = True
         elif o in ['-h']:
@@ -1336,7 +1339,7 @@ def main():
             ovf.write_manifest(ovf_file=ovf_file, mf_file=mf_file, hash_type=checksum_type)
 
             if output_format == "ova":
-                ret = subprocess.check_call(["tar", "--format=ustar", "-h",
+                ret = subprocess.check_call(["tar", f"--format={tar_format}", "-h",
                                              "--owner=0", "--group=0", "--mode=0644",
                                              "-cf",
                                              os.path.join(pwd, output_file)] + all_files)
