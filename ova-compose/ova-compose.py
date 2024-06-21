@@ -1247,7 +1247,7 @@ def main():
     do_manifest = False
     params = {}
     checksum_type = "sha256"
-    tar_format = "ustar"
+    tar_format = "gnu"
 
     try:
         opts, args = getopt.getopt(sys.argv[1:], 'f:hi:mo:q', longopts=['format=', 'input-file=', 'manifest', 'output-file=', 'param=', 'checksum-type=', 'tar-format='])
