@@ -601,7 +601,7 @@ class OVFDisk(object):
             else:
                 print(f"warning: raw image file {raw_image} does not exist, using {path}")
 
-        self.file = OVFFile(path)
+        self.file = OVFFile(path, file_id=file_id)
         disk_info = OVF._disk_info(path)
         self.capacity = int(disk_info['capacity'] / self.allocation_factors[self.units])
         self.used = disk_info['used']

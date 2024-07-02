@@ -22,13 +22,8 @@ hardware:
         type: hard_disk
         parent: sata1
         disk_image: dummy.vmdk
-        disk_id: dummy
-        file_id: dummy_id
-    homedisk_tall:
-        type: hard_disk
-        parent: sata1
-        disk_capacity: 10000
-        disk_id: tall
+        disk_id: !param disk_id=dummy
+        file_id: !param file_id=dummy_id
     usb1:
         type: usb_controller
     ethernet1:
