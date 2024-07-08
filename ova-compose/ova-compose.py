@@ -657,7 +657,7 @@ class OVFProperty(object):
                  password = False,
                  value=None,
                  user_configurable=False, qualifiers=None,
-                 label=None, description=None, category=None):
+                 label=None, description=None, category=None, required=None):
         self.key = key
         self.type = type
         self.password = password
@@ -667,6 +667,7 @@ class OVFProperty(object):
         self.label = label
         self.description = description
         self.category = category
+        self.required = required
 
 
     @classmethod
@@ -688,6 +689,8 @@ class OVFProperty(object):
             xml_attrs['{%s}userConfigurable' % NS_OVF] = "true"
         if self.password:
             xml_attrs['{%s}password' % NS_OVF] = "true"
+        if self.required is not None:
+            xml_attrs['{%s}required' % NS_OVF] = "true" if self.required else "false"
         xml_property = ET.Element('{%s}Property' % NS_OVF, xml_attrs)
         if self.label is not None:
             xml_property.append(xml_text_element('{%s}Label' % NS_OVF, self.label))

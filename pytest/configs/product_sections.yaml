@@ -63,3 +63,10 @@ product_sections:
               description: "a string, yo"
               label: "string"
               category: some
+          prop.required:
+              required: true
+              type: string
+              value: 'a required string'
+              description: "a string that is required"
+              label: "string"
+              category: some
