@@ -15,10 +15,13 @@
 
 DIRS := vmdk ova ova-compose templates
 
-default:: all
+default: all
 
 install all:
 	for x in $(DIRS); do $(MAKE) -C $$x $@; done
+
+fuse install-fuse:
+	$(MAKE) -C vmdk $@
 
 clean:
 	rm -rf build
