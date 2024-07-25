@@ -56,6 +56,7 @@ def test_disk_file_id():
                               "--param", f"rootdisk=dummy.vmdk",
                               "--param", f"disk_id={disk_id}",
                               "--param", f"file_id={file_id}",
+                              "--vmdk-convert", VMDK_CONVERT
                              ],
                              cwd=WORK_DIR)
     assert process.returncode == 0

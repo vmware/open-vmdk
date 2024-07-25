@@ -28,6 +28,8 @@ import shutil
 
 APP_NAME = "ova-compose"
 
+VMDK_CONVERT = "vmdk-convert"
+
 NS_CIM = "http://schemas.dmtf.org/wbem/wscim/1/common"
 NS_OVF = "http://schemas.dmtf.org/ovf/envelope/1"
 NS_RASD = "http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_ResourceAllocationSettingData"
@@ -597,7 +599,7 @@ class OVFDisk(object):
                 # check if the vmdk exists, and if it does if it's newer than the raw image
                 # if not, create vmdk from raw image
                 if not os.path.exists(path) or os.path.getctime(raw_image) > os.path.getctime(path):
-                    subprocess.check_call(['vmdk-convert', raw_image, path])
+                    subprocess.check_call([VMDK_CONVERT, raw_image, path])
             else:
                 print(f"warning: raw image file {raw_image} does not exist, using {path}")
 
@@ -1061,7 +1063,7 @@ class OVF(object):
 
     @staticmethod
     def _disk_info(filename):
-        out = subprocess.check_output(["vmdk-convert", "-i", filename]).decode("UTF-8")
+        out = subprocess.check_output([VMDK_CONVERT, "-i", filename]).decode("UTF-8")
         return json.loads(out)
 
 
@@ -1250,7 +1252,7 @@ def main():
     tar_format = "gnu"
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:], 'f:hi:mo:q', longopts=['format=', 'input-file=', 'manifest', 'output-file=', 'param=', 'checksum-type=', 'tar-format='])
+        opts, args = getopt.getopt(sys.argv[1:], 'f:hi:mo:q', longopts=['format=', 'input-file=', 'manifest', 'output-file=', 'param=', 'checksum-type=', 'tar-format=', 'vmdk-convert='])
     except:
         print ("invalid option")
         sys.exit(2)
@@ -1271,6 +1273,9 @@ def main():
             params[k] = yaml.safe_load(v)
         elif o in ['--tar-format']:
             tar_format = a
+        elif o in ['--vmdk-convert']:
+            global VMDK_CONVERT
+            VMDK_CONVERT = a
         elif o in ['-q']:
             do_quiet = True
         elif o in ['-h']:
