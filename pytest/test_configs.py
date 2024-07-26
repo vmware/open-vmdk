@@ -66,7 +66,7 @@ def test_configs(in_yaml):
     basename = os.path.basename(in_yaml.rsplit(".", 1)[0])
     out_ovf = os.path.join(WORK_DIR, f"{basename}.ovf")
 
-    process = subprocess.run([OVA_COMPOSE, "-i", in_yaml, "-o", out_ovf], cwd=WORK_DIR)
+    process = subprocess.run([OVA_COMPOSE, "-i", in_yaml, "-o", out_ovf, "--vmdk-convert", VMDK_CONVERT], cwd=WORK_DIR)
     assert process.returncode == 0
 
     with open(in_yaml) as f:

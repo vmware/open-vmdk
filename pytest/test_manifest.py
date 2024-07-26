@@ -68,7 +68,7 @@ def test_ovf_manifest(hash_type):
     out_ovf = os.path.join(WORK_DIR, f"{basename}.ovf")
     out_mf = os.path.join(WORK_DIR, f"{basename}.mf")
 
-    args = [OVA_COMPOSE, "-i", in_yaml, "-o", out_ovf, "-m"]
+    args = [OVA_COMPOSE, "-i", in_yaml, "-o", out_ovf, "-m", "--vmdk-convert", VMDK_CONVERT]
     if hash_type is not None:
         args += ["--checksum-type", hash_type]
     else:
@@ -89,7 +89,7 @@ def test_ova_manifest(hash_type):
     out_ova = os.path.join(WORK_DIR, f"{basename}.ova")
     out_mf = os.path.join(WORK_DIR, f"{basename}.mf")
 
-    args = [OVA_COMPOSE, "-i", in_yaml, "-o", out_ova]
+    args = [OVA_COMPOSE, "-i", in_yaml, "-o", out_ova, "--vmdk-convert", VMDK_CONVERT]
     if hash_type is not None:
         args += ["--checksum-type", hash_type]
     else:
@@ -109,7 +109,7 @@ def test_manifest_invalid_checksum_type():
     out_ovf = os.path.join(WORK_DIR, f"{basename}.ovf")
     out_mf = os.path.join(WORK_DIR, f"{basename}.mf")
 
-    args = [OVA_COMPOSE, "-i", in_yaml, "-o", out_ovf, "-m", "--checksum-type", "foobar"]
+    args = [OVA_COMPOSE, "-i", in_yaml, "-o", out_ovf, "-m", "--checksum-type", "foobar", "--vmdk-convert", VMDK_CONVERT]
     process = subprocess.run(args, cwd=WORK_DIR)
     assert process.returncode != 0
 

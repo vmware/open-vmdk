@@ -52,5 +52,5 @@ def test_subdir():
     basename = os.path.basename(in_yaml.rsplit(".", 1)[0])
     out_ovf = os.path.join(WORK_DIR, f"{basename}.ovf")
 
-    process = subprocess.run([OVA_COMPOSE, "-i", in_yaml, "-o", out_ovf, "--param", f"rootdisk={SUB_DIR}/dummy.vmdk"], cwd=WORK_DIR)
+    process = subprocess.run([OVA_COMPOSE, "-i", in_yaml, "-o", out_ovf, "--param", f"rootdisk={SUB_DIR}/dummy.vmdk", "--vmdk-convert", VMDK_CONVERT], cwd=WORK_DIR)
     assert process.returncode == 0
