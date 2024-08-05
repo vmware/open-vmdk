@@ -1,0 +1,81 @@
+system:
+    name: minimal
+    type: vmx-14 vmx-20
+    os_vmw: vmwarePhoton64Guest
+
+networks:
+    vm_network:
+        name: "VM Network1"
+        description: "Network for service1"
+    vm_network2:
+        name: "VM Network2"
+        description: "Network for service 2"
+
+hardware:
+    cpus: 2
+    memory:
+        type: memory
+        size: 4096
+    sata1:
+        type: sata_controller
+    cdrom1:
+        type: cd_drive
+        parent: sata1
+    rootdisk:
+        type: hard_disk
+        parent: sata1
+        disk_image: dummy.vmdk
+    usb1:
+        type: usb_controller
+    ethernet1:
+        type: ethernet
+        subtype: VmxNet3
+        network: vm_network
+    ethernet2:
+        type: ethernet
+        subtype: VmxNet3
+        network: vm_network2
+    videocard1:
+        type: video_card
+    vmci1:
+        type: vmci
+
+product_sections:
+    - product: An Example VM
+      class: foo
+      vendor: A Company Inc.
+      info: Describe product Information
+      version: "1.1"
+      full_version: "1.1-1"
+      properties:
+          vmname:
+            type: string
+            value: "Awesome Appliance"
+
+    - instance: bar
+      transports:
+        - iso
+        - com.vmware.guestInfo
+      categories:
+          some: Some Properties
+          other: Other Properties
+      properties:
+          prop.int:
+              user_configurable: true
+              type: uint16
+              value: '50000'
+              description: "an unsigned integer"
+              label: "integer"
+              category: other
+          prop.string:
+              user_configurable: true
+              type: string
+              value: 'a string'
+              description: "a string, yo"
+              label: "string"
+              category: some
+              password: true
+
+annotation:
+    text: the password is top secret
+    info: Any information
