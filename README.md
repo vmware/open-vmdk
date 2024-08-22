@@ -47,7 +47,7 @@ $ make
 $ make install
 ```
 
-You can change the prefix with `PREXIX` (default is `usr`) or the installation directory with `DESTDIR` for packaging, for example:
+You can change the prefix with `PREFIX` (default is `usr`) or the installation directory with `DESTDIR` for packaging, for example:
 ```
 $ make DESTDIR=/tmp/open-vmdk install
 ```
