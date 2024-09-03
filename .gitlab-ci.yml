@@ -1,0 +1,15 @@
+stages:
+- test
+- cayman_poi
+
+cayman_poi:
+    stage: cayman_poi
+    script:
+        - gitlab --private-token=$CAYMAN_POI_CICD_API_TOKEN project-branch create --project-id core-build/cayman_photon-os-installer --branch test/open-vmdk-submodule/$CI_COMMIT_SHORT_SHA --ref vmware-master
+        - gitlab --private-token=$CAYMAN_POI_CICD_API_TOKEN project update-submodule --id core-build/cayman_photon-os-installer --branch test/open-vmdk-submodule/$CI_COMMIT_SHORT_SHA --submodule poi/open-vmdk --commit-sha $CI_COMMIT_SHA
+
+pytest:
+    stage: test
+    script:
+        - make
+        - pytest-3 pytest/
