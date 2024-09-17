@@ -1,4 +1,4 @@
-# Copyright (c) 2023 VMware, Inc.  All Rights Reserved.
+# Copyright (c) 2024 Broadcom.  All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the “License”); you may not
 # use this file except in compliance with the License.  You may obtain a copy of
@@ -18,7 +18,7 @@ import shutil
 import subprocess
 import yaml
 import xmltodict
-
+import test_envelope_configs
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 OVA_COMPOSE = os.path.join(THIS_DIR, "..", "ova-compose", "ova-compose.py")
@@ -28,15 +28,22 @@ VMDK_CONVERT=os.path.join(THIS_DIR, "..", "build", "vmdk", "vmdk-convert")
 CONFIG_DIR=os.path.join(THIS_DIR, "configs")
 
 WORK_DIR=os.path.join(os.getcwd(), "pytest-configs")
-SUB_DIR=os.path.join(WORK_DIR, "subdir")
 
 
-@pytest.mark.parametrize("setup_test", [SUB_DIR], indirect=True)
-def test_subdir(setup_test):
-    in_yaml = os.path.join(CONFIG_DIR, "basic_param.yaml")
+@pytest.fixture(scope='module', autouse=True)
+def setup_test():
+    os.makedirs(WORK_DIR, exist_ok=True)
 
-    basename = os.path.basename(in_yaml.rsplit(".", 1)[0])
-    out_ovf = os.path.join(WORK_DIR, f"{basename}.ovf")
-
-    process = subprocess.run([OVA_COMPOSE, "-i", in_yaml, "-o", out_ovf, "--param", f"rootdisk={SUB_DIR}/dummy.vmdk", "--vmdk-convert", VMDK_CONVERT], cwd=WORK_DIR)
+    # Dont create vmdk
+    process = subprocess.run(["dd", "if=/dev/zero", "of=dummy.img", "bs=1024", "count=1024"], cwd=WORK_DIR)
     assert process.returncode == 0
+
+    yield
+    shutil.rmtree(WORK_DIR)
+
+
+@pytest.mark.parametrize('get_configs', [os.path.join(CONFIG_DIR, "raw-image.yaml")], indirect=True)
+def test_raw_image_configs(setup_test, get_configs):
+    # test raw_image and other configs
+    test_envelope_configs.test_envelope_configs(None, get_configs)
+

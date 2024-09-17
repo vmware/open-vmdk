@@ -30,21 +30,7 @@ CONFIG_DIR=os.path.join(THIS_DIR, "configs")
 WORK_DIR=os.path.join(os.getcwd(), "pytest-configs")
 
 
-@pytest.fixture(scope='module', autouse=True)
-def setup_test():
-    os.makedirs(WORK_DIR, exist_ok=True)
-
-    process = subprocess.run(["dd", "if=/dev/zero", "of=dummy.img", "bs=1024", "count=1024"], cwd=WORK_DIR)
-    assert process.returncode == 0
-
-    process = subprocess.run([VMDK_CONVERT, "dummy.img", "dummy.vmdk"], cwd=WORK_DIR)
-    assert process.returncode == 0
-
-    yield
-    shutil.rmtree(WORK_DIR)
-
-
-def test_disk_file_id():
+def test_disk_file_id(setup_test):
     disk_id = "foo_id"
     file_id = "bar_id"
     in_yaml = os.path.join(CONFIG_DIR, "custom_disk_id.yaml")

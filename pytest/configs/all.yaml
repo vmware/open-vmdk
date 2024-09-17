@@ -2,6 +2,7 @@ system:
     name: minimal
     type: vmx-14 vmx-20
     os_vmw: vmwarePhoton64Guest
+    firmware: efi
 
 networks:
     vm_network:
@@ -16,11 +17,15 @@ hardware:
     memory:
         type: memory
         size: 4096
+    scsi1:
+        type: scsi_controller
+        subtype: lsilogic
     sata1:
         type: sata_controller
     cdrom1:
         type: cd_drive
         parent: sata1
+        connected: true
     rootdisk:
         type: hard_disk
         parent: sata1
@@ -31,6 +36,7 @@ hardware:
         type: ethernet
         subtype: VmxNet3
         network: vm_network
+        connected: false
     ethernet2:
         type: ethernet
         subtype: VmxNet3
@@ -75,6 +81,17 @@ product_sections:
               label: "string"
               category: some
               password: true
+
+configurations:
+    tall:
+        label: Tall
+        description: too little for the money
+    grande:
+        label: Grande
+        description: just right
+    venti:
+        label: Venti
+        description: too much
 
 annotation:
     text: the password is top secret

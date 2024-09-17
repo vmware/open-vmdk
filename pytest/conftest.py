@@ -1,4 +1,4 @@
-# Copyright (c) 2023 VMware, Inc.  All Rights Reserved.
+# Copyright (c) 2024 Broadcom.  All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the “License”); you may not
 # use this file except in compliance with the License.  You may obtain a copy of
@@ -10,6 +10,7 @@
 # under the License is distributed on an “AS IS” BASIS, without warranties or
 # conditions of any kind, EITHER EXPRESS OR IMPLIED.  See the License for the
 # specific language governing permissions and limitations under the License.
+
 
 import glob
 import os
@@ -25,13 +26,15 @@ OVA_COMPOSE = os.path.join(THIS_DIR, "..", "ova-compose", "ova-compose.py")
 
 VMDK_CONVERT=os.path.join(THIS_DIR, "..", "build", "vmdk", "vmdk-convert")
 
-CONFIG_DIR=os.path.join(THIS_DIR, "configs")
-
 WORK_DIR=os.path.join(os.getcwd(), "pytest-configs")
 
 
-@pytest.fixture(scope='module', autouse=True)
-def setup_test():
+@pytest.fixture(scope='module')
+def setup_test(request):
+    global WORK_DIR
+    if hasattr(request, 'param'):
+        WORK_DIR = request.param
+
     os.makedirs(WORK_DIR, exist_ok=True)
 
     process = subprocess.run(["dd", "if=/dev/zero", "of=dummy.img", "bs=1024", "count=1024"], cwd=WORK_DIR)
@@ -42,6 +45,7 @@ def setup_test():
 
     yield
     shutil.rmtree(WORK_DIR)
+    WORK_DIR = os.path.join(os.getcwd(), "pytest-configs")
 
 
 def yaml_param(loader, node):
@@ -61,8 +65,9 @@ def yaml_param(loader, node):
     return value
 
 
-@pytest.mark.parametrize("in_yaml", glob.glob(os.path.join(CONFIG_DIR, "*.yaml")))
-def test_configs(in_yaml):
+@pytest.fixture(scope='module')
+def get_configs(request):
+    in_yaml = request.param
     basename = os.path.basename(in_yaml.rsplit(".", 1)[0])
     out_ovf = os.path.join(WORK_DIR, f"{basename}.ovf")
 
@@ -78,18 +83,4 @@ def test_configs(in_yaml):
     with open(out_ovf) as f:
         ovf = xmltodict.parse(f.read())
 
-    cfg_system = config['system']
-    assert cfg_system['name'] == ovf['Envelope']['VirtualSystem']['Name']
-    assert cfg_system['os_vmw'] == ovf['Envelope']['VirtualSystem']['OperatingSystemSection']['@vmw:osType']
-    assert cfg_system['type'] == ovf['Envelope']['VirtualSystem']['VirtualHardwareSection']['System']['vssd:VirtualSystemType']
-
-    vmw_configs = ovf['Envelope']['VirtualSystem']['VirtualHardwareSection']['vmw:Config']
-
-    # TODO: check if default is set to bios unless no_default_configs is set
-    if 'firmware' in cfg_system:
-        firmware = None
-        if type(vmw_configs) == list:
-            for vmw_config in vmw_configs:
-                if vmw_config['@vmw:key'] == "firmware":
-                    firmware = vmw_config['@vmw:value']
-        assert cfg_system['firmware'] == firmware
+    yield config, ovf
