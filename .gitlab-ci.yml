@@ -1,6 +1,20 @@
+variables:
+    POI_REGISTRY: poi-registry:5000
+    POI_IMAGE_BASE: ${POI_REGISTRY}/photon/installer:latest
+    POI_IMAGE_NAME: ${POI_REGISTRY}/photon/installer:open-vmdk-$CI_COMMIT_SHORT_SHA
+    GITHUB_BRANCH: master
+
 stages:
 - build
 - test
+
+build-container:
+    stage: build
+    needs: []
+    script:
+        - cd docker && docker build -t ${POI_IMAGE_NAME} --build-context open-vmdk=$(realpath $(pwd)/..) --build-arg POI_IMAGE=$POI_IMAGE_BASE -f Dockerfile-open-vmdk-tot .
+        - docker push ${POI_IMAGE_NAME}
+        - docker system prune -f
 
 cayman_poi:
     stage: build
@@ -12,6 +26,7 @@ cayman_poi:
 
 pytest:
     stage: test
+    needs: []
     script:
         - make
         - pytest-3 pytest/
