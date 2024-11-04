@@ -71,12 +71,21 @@ def get_configs(request):
     basename = os.path.basename(in_yaml.rsplit(".", 1)[0])
     out_ovf = os.path.join(WORK_DIR, f"{basename}.ovf")
 
-    process = subprocess.run([OVA_COMPOSE, "-i", in_yaml, "-o", out_ovf, "--vmdk-convert", VMDK_CONVERT], cwd=WORK_DIR)
+    params = {
+        'eulafile': f"{CONFIG_DIR}/EULA.txt",
+        'disk': "dummy.vmdk"
+    }
+
+    param_args = []
+    for k, v in params.items():
+        param_args.append("--param")
+        param_args.append(f"{k}={v}")
+    process = subprocess.run([OVA_COMPOSE, "-i", in_yaml, "-o", out_ovf, "--vmdk-convert", VMDK_CONVERT] + param_args, cwd=WORK_DIR)
     assert process.returncode == 0
 
     with open(in_yaml) as f:
         yaml_loader = yaml.SafeLoader
-        yaml_loader.app_params = {}
+        yaml_loader.app_params = params
         yaml.add_constructor("!param", yaml_param, Loader=yaml_loader)
         config = yaml.load(f, Loader=yaml_loader)
 
