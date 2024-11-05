@@ -2,18 +2,30 @@ live: false
 
 hostname: photon-machine
 
+password:
+  crypted: false
+  text: changeme
+
 disks:
     default:
         filename: !param imgfile=photon.img
         size: 16384
 
-packagelist_file: packages_ova.json
+partitions:
+    - mountpoint: /
+      size: 0
+      filesystem: ext4
+    - mountpoint: /boot
+      size: 128
+      filesystem: ext4
+    - sizepercent: 5
+      filesystem: swap
 
-password:
-  age: 0
-  crypted: false
-  text: changeme
+packages:
+    - minimal
 
-public_key: ""
+linux_flavor: linux
 
-linux_flavor: linux-esx
+postinstall:
+    # allow ssh root login
+    - sed -i "s/\(^PermitRootLogin\)[ ]*no$/\1 yes/g" /etc/ssh/sshd_config

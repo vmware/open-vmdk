@@ -25,7 +25,7 @@ hardware:
     rootdisk:
         type: hard_disk
         parent: scsi1
-        disk_image: !param disk
+        disk_image: !param disk=photon.vmdk
     usb1:
         type: usb_controller
     ethernet1:
@@ -48,4 +48,4 @@ annotation:
       to change the password during first login.
 
 eula:
-    file: !param eulafile
+    file: !param eulafile=EULA.txt

@@ -27,7 +27,7 @@ OVA_COMPOSE = os.path.join(THIS_DIR, "..", "ova-compose", "ova-compose.py")
 VMDK_CONVERT=os.path.join(THIS_DIR, "..", "build", "vmdk", "vmdk-convert")
 
 WORK_DIR=os.path.join(os.getcwd(), "pytest-configs")
-
+CONFIG_DIR=os.path.join(THIS_DIR, "configs")
 
 @pytest.fixture(scope='module')
 def setup_test(request):
