@@ -1,0 +1,31 @@
+live: false
+
+hostname: photon-machine
+
+password:
+  crypted: false
+  text: changeme
+
+disks:
+    default:
+        filename: !param imgfile=photon.img
+        size: 16384
+
+partitions:
+    - mountpoint: /
+      size: 0
+      filesystem: ext4
+    - mountpoint: /boot
+      size: 128
+      filesystem: ext4
+    - sizepercent: 5
+      filesystem: swap
+
+packages:
+    - minimal
+
+linux_flavor: linux
+
+postinstall:
+    # allow ssh root login
+    - sed -i "s/\(^PermitRootLogin\)[ ]*no$/\1 yes/g" /etc/ssh/sshd_config

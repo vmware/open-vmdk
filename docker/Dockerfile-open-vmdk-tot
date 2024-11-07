@@ -1,0 +1,27 @@
+# Dockerfile to enhance base POI image with open-vmdk changes
+# for testing.
+
+# sudo docker buildx build --build-context open-vmdk=/home/okurth/projects/open-vmdk/ --build-arg POI_IMAGE=$POI_IMAGE -t $POI_IMAGE-open-vmdk -f Dockerfile-open-vmdk .
+
+ARG DOCKER_PROXY
+ARG POI_IMAGE=photon/installer
+
+FROM ${DOCKER_PROXY}library/photon:5.0 as open-vmdk-rpm-builder
+ARG TDNF_OPTIONS
+
+RUN tdnf ${TDNF_OPTIONS} makecache && \
+    tdnf ${TDNF_OPTIONS} -y install git rpm-build python3 build-essential createrepo
+
+COPY --from=open-vmdk / /open-vmdk
+
+COPY build-rpms.sh /usr/bin/
+
+RUN cd /open-vmdk && build-rpms.sh open-vmdk
+
+
+FROM ${POI_IMAGE}
+
+COPY --from=open-vmdk-rpm-builder /usr/src/photon /open-vmdk
+
+# install directly from path to make sure we are using current source
+RUN tdnf ${TDNF_OPTIONS} -y install /open-vmdk/RPMS/*/open-vmdk-*.rpm
