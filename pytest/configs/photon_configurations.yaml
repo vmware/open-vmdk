@@ -1,0 +1,72 @@
+system:
+    name: minimal
+    type: vmx-14 vmx-20 vmx-21
+    os_vmw: vmwarePhoton64Guest
+    firmware: efi
+    secure_boot: false
+
+networks:
+    vm_network:
+        name: "VM Network"
+        description: "The VM Network network"
+
+hardware:
+    cpus_tall:
+        type: cpus
+        number: 2
+        configuration: tall
+    cpus_grande:
+        type: cpus
+        number: 4
+        configuration: grande
+    cpus_venti:
+        type: cpus
+        number: 8
+        configuration: venti
+    memory_tall:
+        type: memory
+        size: 2048
+        configuration: tall
+    memory_grande:
+        type: memory
+        size: 4096
+        configuration: grande
+    memory_venti:
+        type: memory
+        size: 8192
+        configuration: venti
+    sata1:
+        type: sata_controller
+    scsi1:
+        type: scsi_controller
+    cdrom1:
+        type: cd_drive
+        parent: sata1
+    Harddisk 1:
+        type: hard_disk
+        parent: scsi1
+        disk_image: !param disk=photon.vmdk
+        units: byte
+    usb2:
+        type: usb_controller
+    usb3:
+        type: usb3_controller
+    ethernet1:
+        type: ethernet
+        subtype: VmxNet3
+        network: vm_network
+    videocard1:
+        type: video_card
+    vmci1:
+        type: vmci
+
+configurations:
+    tall:
+        label: Tall
+        description: too little for the money
+    grande:
+        label: Grande
+        description: just right
+    venti:
+        label: Venti
+        description: too much

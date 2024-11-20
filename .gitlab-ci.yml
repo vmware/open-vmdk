@@ -12,6 +12,7 @@ build-container:
     stage: build
     needs: []
     script:
+        - set -e
         - cd docker && docker build -t ${POI_IMAGE_NAME} --build-context open-vmdk=$(realpath $(pwd)/..) --build-arg POI_IMAGE=$POI_IMAGE_BASE -f Dockerfile-open-vmdk-tot .
         - docker push ${POI_IMAGE_NAME}
         - docker system prune -f
@@ -20,6 +21,7 @@ cayman_poi:
     stage: build
     needs: []
     script:
+        - set -e
         - git clone --depth 1 https://:${POI_HARNESS_PULL_TOKEN}@${CI_SERVER_HOST}/photon/poi-harness.git
         - cd poi-harness
         - ./gitlab/submodule_ci.py --private-token=$CAYMAN_POI_CICD_API_TOKEN --project-id core-build/cayman_photon-os-installer --branch test/open-vmdk-submodule/$CI_COMMIT_SHORT_SHA --parent-branch vmware-master --submodule-path poi/open-vmdk --submodule-sha $CI_COMMIT_SHA
@@ -28,6 +30,7 @@ pytest:
     stage: test
     needs: []
     script:
+        - set -e
         - make
         - pytest-3 pytest/
 
@@ -38,7 +41,8 @@ poi-harness:
     needs:
         - build-container
     script:
-        - mkdir harness && cp pytest/ks/*.yaml pytest/configs/{photon.yaml,EULA.txt} harness/
+        - set -e
+        - mkdir harness && cp pytest/ks/*.yaml pytest/configs/{photon*.yaml,EULA.txt} harness/
         - cd harness
         - docker run --rm --privileged -v/dev:/dev -v$(pwd):/workdir ${POI_IMAGE_NAME} create-image --repo-paths 'https://packages.vmware.com/photon/$releasever/photon_updates_$releasever_$basearch' -c ova_ks.yaml -v 5.0
         - docker run --rm -v$(pwd):/workdir -w/workdir ${POI_IMAGE_NAME} create-ova --ovf --vmdk --installer-config ova_ks.yaml --ova-config photon.yaml --ova-name photon
@@ -46,6 +50,16 @@ poi-harness:
         - git clone --depth=1 https://:${POI_HARNESS_PULL_TOKEN}@${CI_SERVER_HOST}/photon/poi-harness.git
         # POI harness will deploy OVF on a VC and run tests
         - pytest ./poi-harness/ci/pytest/ -rs --deploy --ovf photon.ovf --name ${VM_NAME} --vc_config ${VC_CONFIG_FILE} --ks_config ova_ks.yaml --ova_config photon.yaml
+
+        # create OVF using photon_configurations.yaml, re-use the vmdk:
+        - docker run --rm -v$(pwd):/workdir -w/workdir ${POI_IMAGE_NAME} create-ova --ovf --installer-config ova_ks.yaml --ova-config photon_configurations.yaml --ova-name photon_configurations
+        - |
+            for option in tall grande venti ; do \
+                pytest ./poi-harness/ci/pytest/ -rs \
+                --deploy --ovf photon_configurations.ovf --name ${VM_NAME}-${option} \
+                --vc_config ${VC_CONFIG_FILE} --ks_config ova_ks.yaml --ova_config photon_configurations.yaml --deployment_option=${option} ; \
+            done
+
     after_script:
         # change ownerships for cleanup
         - cd harness
