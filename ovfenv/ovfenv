@@ -1,0 +1,477 @@
+#!/usr/bin/python
+#
+# Copyright 2011 VMware, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+
+#
+#
+# Show the value of an OVF property, whether the properties
+# were presented to this VM in guestinfo, on a cdrom, or
+# in Studio's default file.
+#
+# Optionally, allows a property value to be modified. In that
+# case, the guestinfo structure is modified, and Studio's
+# default file is also updated.
+#
+#
+# Examples of usage:
+#
+# ovfenv
+#    shows all the properties in id[key]=value format
+#
+#
+# ovfenv --dump
+#    dumps the raw XML to stdout
+#
+#
+# ovfenv --key vm.name
+#
+#    shows the local VM's value for the property named
+#    vm.name, which is equivalent to
+#
+# ovfenv --key [vm.name]
+#
+#
+# ovfenv --key Property_1 --id ubuntu8044
+#
+#    shows the VM named ubuntu8044's value for the property
+#    named Property_1, which is equivalent to
+#
+# ovfenv --key ubuntu8044[Property_1]
+#
+#
+# ovfenv --key vm.email --value foo@bar.com
+#
+#    sets the value of the local VM's property named
+#    vm.email to foo@bar.com, which is equivalent to
+#
+# ovfenv --key [vm.email]=foo@bar.com
+#
+#
+# ovfenv --key vm.password --value ''
+#
+#    clears the value of the local VM's property named
+#    vm.password, which is equivalent to
+#
+# ovfenv --key [vm.password]=
+#
+from __future__ import print_function
+
+import sys
+import os
+import libxml2
+import getopt
+import subprocess
+import tempfile
+
+import gettext
+
+__t = gettext.translation('ovfenv', '/opt/vmware/lib/locale', fallback=True)
+_ = __t.ugettext if sys.version_info[0] < 3 else __t.gettext
+
+debug = False
+quiet = False
+
+#
+# Xpath expressions
+#
+XPATH_ENVIRONMENT              = "//o:Environment"
+XPATH_PROPERTY                 = "/o:PropertySection/o:Property"
+XPATH_MYPROPERTY               = XPATH_ENVIRONMENT + XPATH_PROPERTY
+XPATH_ENTITY                   = XPATH_ENVIRONMENT + "/o:Entity"
+XPATH_ENTITYID                 = XPATH_ENTITY + "[@oe:id='"
+XPATH_KEY                      = "key"
+XPATH_NSKEY                    = "@oe:" + XPATH_KEY
+XPATH_VALUE                    = "value"
+XPATH_NSVALUE                  = "oe:value"
+XPATH_ID                       = "id"
+
+#
+# Various unavoidable shell commands
+#
+VMTOOLS_PATH      = '/usr/lib/vmware-tools/sbin:/usr/sbin'
+GET_GUESTINFO     = ["vmware-rpctool", "'info-get guestinfo.ovfEnv'"]
+SET_GUESTINFO     = ["vmware-rpctool", "info-set guestinfo.ovfEnv "]
+MOUNTCD           = ["/bin/mount", "-r"]
+UNMOUNTCD         = ["/bin/umount"]
+
+#
+# pathnames
+#
+OVFENV            = "ovf-env.xml"
+CDDRIVES          = "/proc/sys/dev/cdrom/info"
+STUDIOENVCOPY     = "/opt/vmware/etc/vami/ovfEnv.xml"
+
+
+#
+# Namespaces
+#
+NSDICT = \
+{
+    'o'     :   "http://schemas.dmtf.org/ovf/environment/1",
+    'xsi'   :   "http://www.w3.org/2001/XMLSchema-instance",
+    'oe'    :   "http://schemas.dmtf.org/ovf/environment/1",
+    've'    :   "http://www.vmware.com/schema/ovfenv"
+}
+
+
+
+def stderr(msg):
+    if not quiet:
+        print(msg, file=sys.stderr)
+
+
+def runcmd(cmd):
+    if debug:
+        print(' '.join(cmd))
+
+    pobj = subprocess.Popen(cmd, bufsize=1, shell=False,
+                            universal_newlines=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT)
+    while True:
+        line = pobj.stdout.readline()
+        if not line:
+            break
+        if debug:
+            print(line, end=' ', file=sys.stderr)
+
+    return(pobj.wait())
+
+
+
+def parse_error(ctx, msg):
+    stderr (_("XML parse error: ") + msg)
+
+
+def set_vmtools_path():
+    vmtools_env = os.environ.copy()
+    vmtools_env["PATH"] = VMTOOLS_PATH + ':' + vmtools_env["PATH"]
+    return vmtools_env
+
+
+def get_env_from_guestinfo():
+    try:
+        pobj = subprocess.Popen(' '.join(GET_GUESTINFO), bufsize=1, shell=True,
+                                universal_newlines=True,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
+                                env=set_vmtools_path())
+        dom = pobj.stdout.read()
+        ret = pobj.wait()
+        if ret or not dom or dom.startswith("No value found"):
+            return False
+        return dom
+    except:
+        return False
+
+
+
+def get_cd_devices():
+    devices = []
+    line = "dummy"
+    try:
+        fd = open(CDDRIVES, "r")
+        while line:
+            line = fd.readline()
+            if line.startswith("drive name:"):
+                #
+                # take a line that looks like this:
+                #    drive name:             hdb     hda
+                # and turn it into a list like this:
+                # ['/dev/hdb', '/dev/hda']
+                #
+                devices = ["/dev/"+x for x in line.split(':', 1)[1].split()]
+                break
+
+    except Exception as msg:
+        if debug:
+            stderr(_("Unable to determine the cdrom devices, perhaps none have been configured: ") + str(msg))
+
+    return devices
+
+
+def cd_has_media(dev):
+    if runcmd(['dd', 'if=' + dev, 'bs=1', 'count=1']):
+        return False
+    return True
+
+
+def get_env_from_iso():
+    ovfenv = False
+    cds = get_cd_devices()
+    tmpmount = tempfile.mkdtemp()
+    cmd = []
+
+    for c in cds:
+        if debug:
+            stderr (_("CD found ") + c)
+
+        if not cd_has_media(c):
+            if debug:
+                stderr(_(c + " has no media"))
+            continue
+
+        try:
+            cmd = MOUNTCD + [c, tmpmount]
+            runcmd(cmd)
+            try:
+                ovfenvpath = os.path.join(tmpmount, OVFENV)
+                fd = open(ovfenvpath, 'r')
+            except:
+                cmd = UNMOUNTCD + [tmpmount]
+                runcmd(cmd)
+            else:
+                ovfenv = fd.read()
+                fd.close()
+                cmd = UNMOUNTCD + [tmpmount]
+                runcmd(cmd)
+
+        except Exception as msg:
+            stderr (_("Unable to run ") + ' '.join(cmd) + ": " + str(msg))
+
+    os.rmdir(tmpmount)
+    return ovfenv
+
+
+
+def get_env_from_file(f):
+    dom = False
+    try:
+        fd = open(f, "r")
+        dom = fd.read()
+        fd.close()
+    except Exception as msg:
+        if debug:
+            stderr (_("Unable to use ") + f + ": " +  str(msg))
+    return dom
+
+
+
+def load_ovfenv(xp, ovfenv):
+    nodes = xp.xpathEval(XPATH_MYPROPERTY)
+    for n in nodes:
+        ovfenv.append((None, n.prop(XPATH_KEY), n.prop(XPATH_VALUE)))
+
+    nodes = xp.xpathEval(XPATH_ENTITY)
+    for n in nodes:
+        entity = n.prop(XPATH_ID)
+        subnodes = xp.xpathEval(XPATH_ENTITYID + entity + "']" + XPATH_PROPERTY)
+        for sn in subnodes:
+            ovfenv.append((entity, sn.prop(XPATH_KEY), sn.prop(XPATH_VALUE)))
+
+    if debug:
+        stderr(ovfenv)
+
+
+def set_property_value(doc, xp, entity_id, key, value):
+    if entity_id:
+        xpath = XPATH_ENTITYID + entity_id + "']" + XPATH_PROPERTY
+    else:
+        xpath = XPATH_MYPROPERTY
+
+    xpath += '[' + XPATH_NSKEY + '=' + "'" + key + "']"
+    node = xp.xpathEval(xpath)
+
+    if len(node):
+        node[0].setProp(XPATH_NSVALUE, value)
+    else:
+        stderr(_("Unable to find a key named '" + key + "'"))
+        return 1
+
+    cmd = [SET_GUESTINFO[0], SET_GUESTINFO[1] + doc.serialize()]
+    if debug:
+        print (' '.join(cmd))
+    if subprocess.call(cmd,
+                       universal_newlines=True,
+                       env=set_vmtools_path()) != 0:
+        stderr (_("Unable to set guestinfo property values"))
+        return 1
+
+    try:
+        fd = open(STUDIOENVCOPY, "w")
+        fd.write(doc.serialize())
+        fd.close()
+    except Exception as msg:
+        stderr (_("Unable to write to ") + STUDIOENVCOPY + ": " + str(msg))
+        return 1
+
+    return 0
+
+
+def usage():
+    stderr (_("Usage: ") +
+           sys.argv[0] +
+           " [-h|--help] [-d|--dump] [-f|--file <ovfenvfile>] [-i|--id <VM ID>] [-k|--key <key>] [-v|--value <value>] [-D|--debug] [-q|--quiet]")
+
+    stderr(_("""\nExamples of usage:
+
+ovfenv
+   shows all the properties in id[key]=value format
+
+ovfenv --dump
+   dumps the raw OVF Environment XML to stdout
+
+ovfenv --key vm.name
+ovfenv --key [vm.name]
+   shows the local VM's value for the property named vm.name
+
+ovfenv --key Property_1 --id ubuntu8044
+ovfenv --key ubuntu8044[Property_1]
+   shows the VM named ubuntu8044's value for the property
+   named Property_1
+
+ovfenv --key vm.email --value foo@bar.com
+ovfenv --key [vm.email]=foo@bar.com
+   sets the value of the local VM's property named
+   vm.email to foo@bar.com
+
+ovfenv --key vm.password --value ''
+ovfenv --key [vm.password]=
+   clears the value of the local VM's property named
+   vm.password"""))
+
+
+def main():
+    global debug
+    global quiet
+    ovfenv = []
+    searchkey = None
+    searchentity = None
+    setvalue = None
+    show_all = False
+    dump = False
+    fromfile = False
+
+    try:
+        opts, args = getopt.getopt(sys.argv[1:],
+                                   "hk:dv:Df:i:q",
+                                   ["help",
+                                    "key=",
+                                    "dump",
+                                    "quiet",
+                                    "value=",
+                                    "debug",
+                                    "file=",
+                                    "id="])
+
+    except getopt.GetoptError as msg:
+        stderr(msg)
+        usage()
+        return 1
+
+    for o, a in opts:
+        if o in ("-h", "--help"):
+            usage()
+            sys.exit(0)
+        elif o in ("-k", "--key"):
+            searchkey = a
+        elif o in ("-v", "--value"):
+            setvalue = a
+        elif o in ("-d", "--dump"):
+            dump = True
+        elif o in ("-D", "--debug"):
+            debug = True
+        elif o in ("-f", "--file"):
+            fromfile = a
+        elif o in ("-i", "--id"):
+            searchentity = a
+        elif o in ("-q", "--quiet"):
+            quiet = True
+
+
+    if not searchkey:
+        show_all = True
+    else:
+        #
+        # Extract the entity and key out of the passed
+        # key. We can be passed
+        #    entity[my.key.name]=newvalue
+        #
+        # and we want entity to be in searchentity, my.key.name
+        # in searchkey, and newvalue in setvalue
+        #
+        equalsfound = searchkey.find('=')
+        if equalsfound != -1:
+            setvalue = searchkey[equalsfound+1:]
+
+        start_bracket = searchkey.find('[')
+        end_bracket = searchkey.rfind(']')
+
+        if start_bracket != -1 and end_bracket != -1:
+            searchentity = searchkey[0:start_bracket]
+            if not searchentity:
+                searchentity = None
+            searchkey = searchkey[start_bracket + 1:end_bracket]
+
+    #
+    # Try the default place that Studio copies the property xml,
+    # then guestinfo, then cdrom drives
+    #
+    if not fromfile:
+        dom = get_env_from_file(STUDIOENVCOPY)
+        if not dom:
+            dom = get_env_from_guestinfo()
+            if not dom:
+                dom = get_env_from_iso()
+    else:
+        dom = get_env_from_file(fromfile)
+
+    if not dom:
+        stderr (_("Unable to find the ovf environment."))
+        return 1
+
+    try:
+        doc = libxml2.parseDoc(dom)
+    except:
+        stderr (_("Unable to parse the following ovf environment: ") + dom)
+        return 1
+
+    xp = doc.xpathNewContext()
+    for k, v in list(NSDICT.items()):
+        xp.xpathRegisterNs(k, v)
+
+    if dump:
+        print (doc.serialize())
+        return 0
+
+    load_ovfenv(xp, ovfenv)
+
+    if setvalue is not None and searchkey:
+        return set_property_value(doc, xp, searchentity, searchkey, setvalue)
+
+    if not show_all:
+        for entity, key, value in ovfenv:
+            if searchentity == entity and key == searchkey:
+                print (value)
+                return 0
+        stderr(_("Unable to find a key named '" + searchkey + "'"))
+        return 1
+    else:
+        for entity, key, value in ovfenv:
+            if entity:
+                print (entity + '[' + key + ']=' + value)
+            else:
+                print ('[' + key + ']=' + value)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
