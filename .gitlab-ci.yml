@@ -13,6 +13,7 @@ build-container:
     needs: []
     script:
         - set -e
+        - docker pull ${POI_IMAGE_BASE}
         - cd docker && docker build -t ${POI_IMAGE_NAME} --build-context open-vmdk=$(realpath $(pwd)/..) --build-arg POI_IMAGE=$POI_IMAGE_BASE -f Dockerfile-open-vmdk-tot .
         - docker push ${POI_IMAGE_NAME}
         - docker system prune -f
