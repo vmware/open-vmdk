@@ -483,17 +483,18 @@ class RasdEthernet(RasdItem):
     connectable = True
 
 
-    def __init__(self, network_id, subtype, connected=True):
+    def __init__(self, network_id, subtype, connected=True, address=None):
         super().__init__()
         self.config = RasdEthernet.DEFAULT_CONFIG.copy()
         self.network_id = network_id
         self.subtype = subtype
         self.connected = connected
+        self.address = address
 
 
     @classmethod
     def from_dict(cls, d):
-        item = cls(d['network'], d['subtype'], d.get('connected', True))
+        item = cls(d['network'], d['subtype'], d.get('connected', True), d.get('address', None))
         return item
 
 
@@ -505,6 +506,8 @@ class RasdEthernet(RasdItem):
         item = super().xml_item(required, element_name)
         item.append(self.xml_element('ResourceSubType', self.subtype))
         item.append(self.xml_element('Connection', self.network.name))
+        if self.address:
+            item.append(self.xml_element('Address', self.address))
         
         return item
 
