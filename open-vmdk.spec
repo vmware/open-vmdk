@@ -26,6 +26,19 @@ Tools to create OVA files from raw disk images. This includes 'vmdk-convert'
 to create VMDKs from raw disk images, and 'ova-compose' to create OVA files
 that can be imported by VMware vSphere or Fusion and Workstation.
 
+%package -n ovfenv
+Summary:       Tools to get or set OVF environment variables
+Group:         Development/Tools
+BuildArch:     noarch
+Requires:      open-vm-tools
+Requires:      python3
+Requires:      python3-libxml2
+
+%description -n ovfenv
+Show the value of an OVF property, whether the properties
+were presented to this VM in guestinfo or on a cdrom.
+Optionally, allows a property value to be modified.
+
 %prep
 %autosetup
 
@@ -43,10 +56,17 @@ rm -rf %{buildroot}/*
 %files
 %defattr(-,root,root)
 %config(noreplace) %{_sysconfdir}/%{name}.conf
-%{_bindir}/*
+%{_bindir}/mkova.sh
+%{_bindir}/ova-compose
+%{_bindir}/vmdk-convert
 %{_datadir}/%{name}/*
 
+%files -n ovfenv
+%defattr(-,root,root)
+%{_bindir}/ovfenv
+
 %changelog
+<<<<<<< HEAD
 * Fri Jun 21 2024 Oliver Kurth <oliver.kurth@broadcom.com> 0.3.11-1
 - update to 0.3.11
 * Fri Jun 21 2024 Oliver Kurth <oliver.kurth@broadcom.com> 0.3.10-0
