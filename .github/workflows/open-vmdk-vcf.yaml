@@ -1,0 +1,111 @@
+name: open-vmdk CI
+
+on: [push, workflow_dispatch]
+
+env:
+    POI_REGISTRY: poi-registry:5000
+    POI_IMAGE_BASE: poi-registry:5000/photon/installer:latest
+    GITHUB_BRANCH: master
+
+jobs:
+    build-container:
+        runs-on: self-hosted
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v3
+
+            - name: Build Docker image
+              run: |
+                  set -e
+                  POI_IMAGE_NAME=${POI_REGISTRY}/photon/installer:open-vmdk-${GITHUB_SHA::7}
+                  cd docker
+                  docker build -t ${POI_IMAGE_NAME} --build-context open-vmdk=$(realpath $(pwd)/..) --build-arg POI_IMAGE=$POI_IMAGE_BASE -f Dockerfile-open-vmdk-tot .
+                  docker push ${POI_IMAGE_NAME}
+                  docker system prune -f
+
+    cayman_poi:
+        runs-on: self-hosted
+        steps:
+            - name: Checkout Cayman POI
+              uses: actions/checkout@master
+              with:
+                  repository: vcf/cayman-poi
+                  ref: vmware-master
+                  path: ./cayman-poi
+                  submodules: "true"
+                  fetch-depth: 0
+                  ssh-key: ${{ secrets.POI_CICD_SSH_KEY }}
+                  ssh-strict: "false"
+
+            - name: create branch and push
+              run: |
+                  cd ./cayman-poi
+                  git checkout -b test/poi-submodule/${GITHUB_SHA::7}
+                  pushd poi/open-vmdk
+                  git checkout ${GITHUB_SHA::7}
+                  popd
+                  git add poi/open-vmdk
+                  git config --global user.email "poi-cd@broadcom.com"
+                  git config --global user.name "POI CI/CD"
+                  git commit -m "update poi/open-vmdk to ${GITHUB_SHA::7} for testing branch ${{ github.ref_name }}"
+                  git push origin test/poi-submodule/${GITHUB_SHA::7}
+
+    pytest:
+        runs-on: self-hosted
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v3
+
+            - name: pytest
+              run: |
+                  set -e
+                  make
+                  pytest-3 pytest/
+
+    poi-harness:
+        runs-on: self-hosted
+        needs: build-container
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@master
+
+            - name: Checkout POI Harness
+              uses: actions/checkout@master
+              with:
+                  repository: vcf/photon-os-installer-harness
+                  ref: main
+                  path: ./poi-harness
+                  ssh-key: ${{ secrets.POI_CICD_SSH_KEY }}
+                  ssh-strict: false
+
+            - name: Build OVA
+              run: |
+                  set -e
+                  VM_NAME=poi-open-vmdk-test-${GITHUB_SHA::7}
+                  POI_IMAGE_NAME=${POI_REGISTRY}/photon/installer:open-vmdk-${GITHUB_SHA::7}
+                  PHOTON_RELEASE="5.0"
+                  # used by pytest
+                  export VC_IP=${{ vars.VC_IP }}
+                  export VC_USER=${{ vars.VC_USER }}
+                  export VC_PASSWORD=${{ secrets.VC_PASSWORD }}
+
+                  mkdir harness
+                  cp pytest/ks/*.yaml pytest/configs/{photon*.yaml,EULA.txt} harness/
+
+                  cd harness
+                  docker run --rm --privileged -v/dev:/dev -v$(pwd):/workdir ${POI_IMAGE_NAME} create-image --repo-paths 'https://packages.vmware.com/photon/$releasever/photon_updates_$releasever_$basearch' -c ova_ks.yaml -v ${PHOTON_RELEASE}
+                  docker run --rm -v$(pwd):/workdir -w/workdir ${POI_IMAGE_NAME} create-ova --ovf --vmdk --installer-config ova_ks.yaml --ova-config photon.yaml --ova-name photon
+
+                  # POI harness will deploy OVF on a VC and run tests
+                  pytest ../poi-harness/ci/pytest/ -rs --deploy --ovf photon.ovf --name ${VM_NAME} --ks_config ova_ks.yaml --ova_config photon.yaml
+
+                  # create OVF using photon_configurations.yaml, re-use the vmdk:
+                  docker run --rm -v$(pwd):/workdir -w/workdir ${POI_IMAGE_NAME} create-ova --ovf --installer-config ova_ks.yaml --ova-config photon_configurations.yaml --ova-name photon_configurations
+                  for option in tall grande venti ; do
+                      pytest ../poi-harness/ci/pytest/ -rs \
+                      --deploy --ovf photon_configurations.ovf --name ${VM_NAME}-${option} \
+                      --ks_config ova_ks.yaml --ova_config photon_configurations.yaml --deployment_option=${option};
+                  done
+
+                  sudo chown -R $(id -u -n):$(id -g -n) .
