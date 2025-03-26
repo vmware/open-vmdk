@@ -1,0 +1,19 @@
+name: tdnf RPMs
+
+permissions:
+    contents: read
+
+on: [push, workflow_dispatch]
+
+jobs:
+    photon-rpms:
+        env:
+            DIST: photon
+            RELEASE: "5.0"
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v2
+            - name: build rpms in container
+              working-directory: ${{ github.workspace }}
+              run: |
+                  docker run --rm -v$(pwd):/workdir -w /workdir ${DIST}:${RELEASE} /workdir/docker/build-rpms.sh open-vmdk
