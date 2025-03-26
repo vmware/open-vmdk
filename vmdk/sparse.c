@@ -810,6 +810,8 @@ SparsePread(DiskInfo *self,
 			break;
 		}
 		readLen = grainSize - readSkip;
+		if (len < readLen)
+			readLen = len;
 
 		sect = __le32_to_cpu(sdi->gtInfo.gt[grainNr]);
 		if (sect == 0) {
