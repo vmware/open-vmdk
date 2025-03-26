@@ -66,7 +66,6 @@ rm -rf %{buildroot}/*
 %{_bindir}/ovfenv
 
 %changelog
-<<<<<<< HEAD
 * Fri Jun 21 2024 Oliver Kurth <oliver.kurth@broadcom.com> 0.3.11-1
 - update to 0.3.11
 * Fri Jun 21 2024 Oliver Kurth <oliver.kurth@broadcom.com> 0.3.10-0

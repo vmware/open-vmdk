@@ -3,6 +3,8 @@ set -e
 
 PACKAGE=$1
 
+tdnf install -y ${TDNF_OPTIONS} rpm-build git tar build-essential createrepo_c
+
 SPEC=${PACKAGE}.spec
 VERSION=$(rpmspec -q --srpm --queryformat "[%{VERSION}\n]" ${SPEC})
 FULLNAME=${PACKAGE}-${VERSION}
