@@ -24,6 +24,7 @@ from lxml import etree as ET
 import hashlib
 import tempfile
 import shutil
+from concurrent.futures import ProcessPoolExecutor
 
 
 APP_NAME = "ova-compose"
@@ -1179,7 +1180,9 @@ class OVF(object):
 
 
     @staticmethod
-    def _get_hash(filename, hash_type, blocksz=1024 * 1024):
+    def _get_hash(args):
+        filename, hash_type = args
+        blocksz = 1024 * 1024
         hash = hashlib.new(hash_type)
         with open(filename, "rb") as f:
             while True:
@@ -1199,9 +1202,12 @@ class OVF(object):
 
         for file in self.files:
             filenames.append(file.path)
+
+        with ProcessPoolExecutor() as executor:
+            hash_results = list(zip(filenames, executor.map(OVF._get_hash, [(fname, hash_type) for fname in filenames])))
+
         with open(mf_file, "wt") as f:
-            for fname in filenames:
-                hash = OVF._get_hash(fname, hash_type)
+            for fname, hash in hash_results:
                 fname = os.path.basename(fname)
                 f.write(f"{hash_type.upper()}({fname})= {hash}\n")
 
