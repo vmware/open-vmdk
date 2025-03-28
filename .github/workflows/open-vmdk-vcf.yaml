@@ -39,16 +39,18 @@ jobs:
 
             - name: create branch and push
               run: |
+                  BRANCH_NAME=test/openvmdk-submodule/${GITHUB_SHA::7}
                   cd ./cayman-poi
-                  git checkout -b test/poi-submodule/${GITHUB_SHA::7}
+                  git checkout -b ${BRANCH_NAME}
                   pushd poi/open-vmdk
+                  git fetch
                   git checkout ${GITHUB_SHA::7}
                   popd
                   git add poi/open-vmdk
-                  git config --global user.email "poi-cd@broadcom.com"
+                  git config --global user.email "poi-cicd@broadcom.com"
                   git config --global user.name "POI CI/CD"
                   git commit -m "update poi/open-vmdk to ${GITHUB_SHA::7} for testing branch ${{ github.ref_name }}"
-                  git push origin test/poi-submodule/${GITHUB_SHA::7}
+                  git push origin ${BRANCH_NAME}
 
     pytest:
         runs-on: self-hosted
