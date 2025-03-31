@@ -111,3 +111,20 @@ jobs:
                   done
 
                   sudo chown -R $(id -u -n):$(id -g -n) .
+
+    github-public:
+        runs-on: self-hosted
+        needs:
+            - cayman_poi
+            - poi-harness
+        if: github.ref_name == 'master'
+        steps:
+           - name: Checkout code
+             uses: actions/checkout@master
+             with:
+                 fetch-depth: 0
+           - name: push to public GitHub
+             run: |
+                 # token needs "repo, workflow" permissions
+                 git remote add github https://gerrit-photon:${{ secrets.GERRIT_PHOTON_GITHUB_TOKEN }}@github.com/vmware/open-vmdk.git || true
+                 git push github
