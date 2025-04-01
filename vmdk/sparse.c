@@ -203,10 +203,6 @@ typedef struct {
 
 typedef struct {
     SparseGTInfo gtInfo;
-    off_t gdOffset;
-    off_t gtOffset;
-    off_t rgdOffset;
-    off_t rgtOffset;
     uint32_t curSP;
     ZLibBuffer zlibBuffer;
     size_t zlibBufferSize;
@@ -550,7 +546,7 @@ StreamOptimizedClose(DiskInfo *self)
         goto failAll;
     }
     writeEOS(&sodi->writer);
-    if (lseek(sodi->writer.fd, sodi->writer.gdOffset * VMDK_SECTOR_SIZE, SEEK_SET) == -1) {
+    if (lseek(sodi->writer.fd, sodi->diskHdr.gdOffset * VMDK_SECTOR_SIZE, SEEK_SET) == -1) {
         goto failAll;
     }
     if (!safeWrite(sodi->writer.fd, sodi->writer.gtInfo.gd, (sodi->writer.gtInfo.GDsectors + sodi->writer.gtInfo.GTsectors * sodi->writer.gtInfo.GTs) * VMDK_SECTOR_SIZE)) {
@@ -635,10 +631,8 @@ StreamOptimized_Create(const char *fileName, off_t capacity)
     sodi->diskHdr.descriptorOffset = sodi->diskHdr.overHead;
     sodi->diskHdr.descriptorSize = 20;
     sodi->diskHdr.overHead = sodi->diskHdr.overHead + sodi->diskHdr.descriptorSize;
-    sodi->writer.gdOffset = sodi->diskHdr.overHead;
-    sodi->diskHdr.gdOffset = sodi->writer.gdOffset;
+    sodi->diskHdr.gdOffset = sodi->diskHdr.overHead;
     sodi->diskHdr.overHead += sodi->writer.gtInfo.GDsectors;
-    sodi->writer.gtOffset = sodi->diskHdr.overHead;
     sodi->diskHdr.overHead = prefillGD(&sodi->writer.gtInfo, sodi->diskHdr.overHead);
     sodi->writer.curSP = sodi->diskHdr.overHead;
     sodi->writer.grainBuffer = malloc(sodi->diskHdr.grainSize * VMDK_SECTOR_SIZE);
