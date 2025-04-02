@@ -284,11 +284,12 @@ prefillGD(SparseGTInfo *gtInfo,
 }
 
 static bool
-safeWrite(int fd,
-          const void *buf,
-          size_t len)
+safePwrite(int fd,
+           const void *buf,
+           size_t len,
+           off_t pos)
 {
-    ssize_t written = write(fd, buf, len);
+    ssize_t written = pwrite(fd, buf, len, pos);
 
     if (written == -1) {
         fprintf(stderr, "Write failed: %s\n", strerror(errno));
@@ -416,7 +417,7 @@ flushGrain(StreamOptimizedDiskInfo *sodi)
             memset(sodi->writer.zstream.next_out, 0, rem);
             dataLen += rem;
         }
-        if (!safeWrite(sodi->writer.fd, grainHdr, dataLen)) {
+        if (!safePwrite(sodi->writer.fd, grainHdr, dataLen, sodi->writer.curSP * VMDK_SECTOR_SIZE)) {
             return -1;
         }
         sodi->writer.curSP += dataLen / VMDK_SECTOR_SIZE;
@@ -502,7 +503,7 @@ writeSpecial(SparseVmdkWriter *writer,
     memset(writer->zlibBuffer.data, 0, VMDK_SECTOR_SIZE);
     specialHdr->lba = __cpu_to_le64(length);
     specialHdr->type = __cpu_to_le32(marker);
-    return safeWrite(writer->fd, specialHdr, VMDK_SECTOR_SIZE);
+    return safePwrite(writer->fd, specialHdr, VMDK_SECTOR_SIZE, writer->curSP * VMDK_SECTOR_SIZE);
 }
 
 static bool
@@ -546,10 +547,9 @@ StreamOptimizedClose(DiskInfo *self)
         goto failAll;
     }
     writeEOS(&sodi->writer);
-    if (lseek(sodi->writer.fd, sodi->diskHdr.gdOffset * VMDK_SECTOR_SIZE, SEEK_SET) == -1) {
-        goto failAll;
-    }
-    if (!safeWrite(sodi->writer.fd, sodi->writer.gtInfo.gd, (sodi->writer.gtInfo.GDsectors + sodi->writer.gtInfo.GTsectors * sodi->writer.gtInfo.GTs) * VMDK_SECTOR_SIZE)) {
+    if (!safePwrite(sodi->writer.fd, sodi->writer.gtInfo.gd,
+                   (sodi->writer.gtInfo.GDsectors + sodi->writer.gtInfo.GTsectors * sodi->writer.gtInfo.GTs) * VMDK_SECTOR_SIZE,
+                   sodi->diskHdr.gdOffset * VMDK_SECTOR_SIZE)) {
         goto failAll;
     }
     do {
