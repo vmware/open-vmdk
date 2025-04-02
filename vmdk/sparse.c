@@ -680,7 +680,6 @@ typedef struct {
     DiskInfo hdr;
     SparseExtentHeader diskHdr;
     SparseGTInfo gtInfo;
-    z_stream zstream;
     int fd;
 } SparseDiskInfo;
 
@@ -931,14 +930,6 @@ Sparse_Open(const char *fileName)
     if (!getGDGT(&sdi->gtInfo, &sdi->diskHdr)) {
         goto failSdi;
     }
-    if (sdi->diskHdr.flags & SPARSEFLAG_COMPRESSED) {
-        sdi->zstream.zalloc = NULL;
-        sdi->zstream.zfree = NULL;
-        sdi->zstream.opaque = sdi;
-        if (inflateInit(&sdi->zstream) != Z_OK) {
-            goto failRB;
-        }
-    }
     if (!safePread(fd, sdi->gtInfo.gd, sdi->gtInfo.GDsectors * VMDK_SECTOR_SIZE, sdi->diskHdr.gdOffset * VMDK_SECTOR_SIZE)) {
         goto failDF;
     }
@@ -960,7 +951,6 @@ Sparse_Open(const char *fileName)
     return &sdi->hdr;
 
 failDF:
-failRB:
 failSdi:
     free(sdi);
 failFd:
