@@ -1,7 +1,9 @@
 system:
     name: minimal
     type: vmx-14 vmx-20
+    os_cim: 36
     os_vmw: vmwarePhoton64Guest
+    os_name: Photon OS 64-bit
     firmware: efi
 
 networks:
