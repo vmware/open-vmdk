@@ -599,7 +599,7 @@ static DiskInfoVMT streamOptimizedVMT = {
 };
 
 DiskInfo *
-StreamOptimized_Create(const char *fileName, off_t capacity)
+StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLevel)
 {
     StreamOptimizedDiskInfo *sodi;
     size_t maxOutSize;
@@ -643,7 +643,7 @@ StreamOptimized_Create(const char *fileName, off_t capacity)
     sodi->writer.zstream.zalloc = NULL;
     sodi->writer.zstream.zfree = NULL;
     sodi->writer.zstream.opaque = &sodi->writer;
-    if (deflateInit(&sodi->writer.zstream, Z_BEST_COMPRESSION) != Z_OK) {
+    if (deflateInit(&sodi->writer.zstream, compressionLevel) != Z_OK) {
         goto failGrainBuffer;
     }
     maxOutSize = deflateBound(&sodi->writer.zstream, sodi->diskHdr.grainSize * VMDK_SECTOR_SIZE) + sizeof(SparseGrainLBAHeaderOnDisk);

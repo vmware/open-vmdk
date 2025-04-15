@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <getopt.h>
+#include <zlib.h>
 
 /* toolsVersion in metadata -
    default is 2^31-1 (unknown) */
@@ -97,7 +98,7 @@ printUsage(char *cmd)
 
 /* Check a string is number */
 static bool
-isNumber(char *text)
+isNumber(const char *text)
 {
     int j;
     j = strlen(text);
@@ -121,12 +122,23 @@ main(int argc,
     int opt;
     bool doInfo = false;
     bool doConvert = false;
+    int compressionLevel = Z_BEST_COMPRESSION;
+    const char *env;
 
     gettimeofday(&tv, NULL);
     srand48(tv.tv_sec ^ tv.tv_usec);
 
+    if ((env = getenv("VMDKCONVERT_COMPRESSION_LEVEL")) != NULL) {
+        if (isNumber(env)) {
+            compressionLevel = atoi(env);
+        }
+    }
+
     while ((opt = getopt(argc, argv, "it:")) != -1) {
-        switch (opt) {
+        switch (opt) {\
+        case 'c':
+            compressionLevel = atoi(optarg);
+            break;
         case 'i':
             doInfo = true;
             break;
@@ -184,7 +196,7 @@ main(int argc,
             capacity = di->vmt->getCapacity(di);
 
             if (strcmp(&(filename[strlen(filename) - 5]), ".vmdk") == 0)
-                tgt = StreamOptimized_Create(filename, capacity);
+                tgt = StreamOptimized_Create(filename, capacity, compressionLevel);
             else
                 tgt = Flat_Create(filename, capacity);
 
