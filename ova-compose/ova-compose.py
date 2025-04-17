@@ -911,6 +911,8 @@ class OVF(object):
         self.name = system['name']
         self.os_cim = system.get('os_cim', 100)
         self.os_vmw = system.get('os_vmw', "other4xLinux64Guest")
+        if 'os_name' in system:
+            self.os_name = system['os_name']
         if 'firmware' in system:
             if system['firmware'] not in ['bios','efi']:
                 raise ValidationError("os.firmware must be 'bios' or 'efi'")
@@ -1113,6 +1115,8 @@ class OVF(object):
         virtual_system.append(xml_text_element('{%s}Name' % NS_OVF, self.vssd_system.identifier))
         oss = ET.Element('{%s}OperatingSystemSection' % NS_OVF, { '{%s}id' % NS_OVF: str(self.os_cim), '{%s}osType' % NS_VMW: self.os_vmw })
         oss.append(xml_text_element('{%s}Info' % NS_OVF, "Operating System"))
+        if hasattr(self, 'os_name'):
+            oss.append(xml_text_element('{%s}Description' % NS_OVF, self.os_name))
         virtual_system.append(oss)
 
         hw_attrs = None

@@ -115,6 +115,8 @@ class TestAllConfigs:
         self.assert_values(cfg_system_section['name'], cfg_vmw_ovf['Name'])
         self.assert_values(cfg_system_section['type'], cfg_vmw_ovf['VirtualHardwareSection']['System']['vssd:VirtualSystemType'])
         self.assert_values(cfg_system_section['os_vmw'], cfg_vmw_ovf['OperatingSystemSection']['@vmw:osType'])
+        self.assert_values(cfg_system_section['os_cim'], int(cfg_vmw_ovf['OperatingSystemSection']['@ovf:id']))
+        self.assert_values(cfg_system_section['os_name'], cfg_vmw_ovf['OperatingSystemSection']['Description'])
 
         for vmw_config in vmw_configs:
             if vmw_config['@vmw:key'] == "firmware":
