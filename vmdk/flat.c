@@ -78,7 +78,7 @@ FlatClose(DiskInfo *self)
 
 static int
 FlatNextData(DiskInfo *self,
-         off_t *pos,
+             off_t *pos,
              off_t *end)
 {
     FlatDiskInfo *fdi = getFDI(self);

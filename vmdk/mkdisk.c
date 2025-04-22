@@ -17,6 +17,7 @@
 
 #include "diskinfo.h"
 
+#include <sys/sysinfo.h>
 #include <sys/time.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -61,19 +62,27 @@ copyData(DiskInfo *dst,
 }
 
 static bool
-copyDisk(DiskInfo *src, DiskInfo *dst)
+copyDisk(DiskInfo *src, DiskInfo *dst, int numThreads)
 {
-    off_t end;
-    off_t pos;
+    if (dst->vmt->copyDisk) {
+        ssize_t ret;
 
-    end = 0;
-    while (src->vmt->nextData(src, &pos, &end) == 0) {
-        if (copyData(dst, pos, src, pos, end - pos)) {
+        ret = dst->vmt->copyDisk(src, dst, numThreads);
+        if (ret < 0) {
+            return false;
+        }
+    } else {
+        off_t end = 0;
+        off_t pos;
+
+        while (src->vmt->nextData(src, &pos, &end) == 0) {
+            if (copyData(dst, pos, src, pos, end - pos)) {
+                goto failAll;
+            }
+        }
+        if (errno != ENXIO) {
             goto failAll;
         }
-    }
-    if (errno != ENXIO) {
-        goto failAll;
     }
     if (dst->vmt->close(dst)) {
         return false;
@@ -87,11 +96,13 @@ failAll:
 
 /* Displays the usage message. */
 static int
-printUsage(char *cmd)
+printUsage(char *cmd, int compressionLevel, int numThreads)
 {
     printf("Usage:\n");
     printf("%s -i src.vmdk: displays information for specified virtual disk\n", cmd);
-    printf("%s [-t toolsVersion] src.vmdk dst.vmdk: converts source disk to destination disk with given tools version\n\n", cmd);
+    printf("%s [-c compressionlevel] [-n threads] [-t toolsVersion] src.vmdk dst.vmdk: converts source disk to destination disk with given tools version\n\n", cmd);
+    printf("-c <level> sets the compression level. Valid values are 1 (fastest) to 9 (best). Only when writing to VMDK. Current is %d.\n", compressionLevel);
+    printf("-n <threads> sets the number of threads used for compression level. Only when writing to VMDK. Current is (%d).\n", numThreads);
 
     return 1;
 }
@@ -128,41 +139,74 @@ main(int argc,
     bool doInfo = false;
     bool doConvert = false;
     int compressionLevel = Z_BEST_COMPRESSION;
+    int numThreads = get_nprocs();
     const char *env;
 
     gettimeofday(&tv, NULL);
     srand48(tv.tv_sec ^ tv.tv_usec);
 
+    /* use environment values, but only if sanity checked */
     if ((env = getenv("VMDKCONVERT_COMPRESSION_LEVEL")) != NULL) {
         if (isNumber(env)) {
-            compressionLevel = atoi(env);
+            int n = atoi(env);
+            if (n > 0 && n <= 9)
+                compressionLevel = atoi(env);
+        }
+    }
+    if ((env = getenv("VMDKCONVERT_NUM_THREADS")) != NULL) {
+        if (isNumber(env)) {
+            int n = atoi(env);
+            if (n > 0)
+                numThreads = atoi(env);
         }
     }
 
-    while ((opt = getopt(argc, argv, "c:it:")) != -1) {
-        switch (opt) {\
+    while ((opt = getopt(argc, argv, "c:hin:t:")) != -1) {
+        switch (opt) {
         case 'c':
+            if (!isNumber(optarg)){
+                fprintf(stderr, "invalid compression level: %s\n", optarg);
+                exit(1);
+            }
             compressionLevel = atoi(optarg);
             break;
         case 'i':
             doInfo = true;
             break;
+        case 'n':
+            if (!isNumber(optarg)) {
+                fprintf(stderr, "invalid threads value: %s\n", optarg);
+                exit(1);
+            }
+            numThreads = atoi(optarg);
+            break;
         case 't':
             doConvert = true;
             toolsVersion = optarg;
             if (!isNumber(toolsVersion)){
-                fprintf(stderr, "Invalid tools version: %s\n", toolsVersion);
+                fprintf(stderr, "invalid tools version: %s\n", toolsVersion);
                 exit(1);
             }
             break;
         case '?':
-            printUsage(argv[0]);
+        case 'h':
+            printUsage(argv[0], compressionLevel, numThreads);
             exit(1);
         }
     }
 
+    if (numThreads <= 0) {
+        fprintf(stderr, "number of threads must be > 0: %d\n", numThreads);
+        exit(1);
+    }
+
+    if (compressionLevel <= 0 || compressionLevel > 9) {
+        fprintf(stderr, "compression level must be > 0 and <= 9: %d\n", compressionLevel);
+        exit(1);
+    }
+
     if (doInfo && doConvert) {
-        printUsage(argv[0]);
+        printUsage(argv[0], compressionLevel, numThreads);
         exit(1);
     }
 
@@ -208,8 +252,13 @@ main(int argc,
             if (tgt == NULL) {
                 fprintf(stderr, "Cannot open target disk %s: %s\n", filename, strerror(errno));
             } else {
+<<<<<<< HEAD
                 printf("Starting to convert %s to %s using compression level %d\n", src, filename, compressionLevel);
                 if (copyDisk(di, tgt)) {
+=======
+                printf("Starting to convert %s to %s using compression level %d and %d threads\n", src, filename, compressionLevel, numThreads);
+                if (copyDisk(di, tgt, numThreads)) {
+>>>>>>> b955bfd (Add multithreaded compression.)
                     printf("Success\n");
                 } else {
                     fprintf(stderr, "Failure!\n");

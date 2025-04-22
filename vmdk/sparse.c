@@ -20,6 +20,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -201,18 +202,24 @@ typedef struct {
     __le32 *gt;
 } SparseGTInfo;
 
-typedef struct {
-    SparseGTInfo gtInfo;
-    uint32_t curSP;
+typedef struct GrainInfo {
     ZLibBuffer zlibBuffer;
     size_t zlibBufferSize;
     z_stream zstream;
+
+    uint8_t *buffer;
+    uint64_t bufferNr;
+    uint32_t bufferValidStart;
+    uint32_t bufferValidEnd;
+} GrainInfo;
+
+typedef struct {
+    SparseGTInfo gtInfo;
+    uint32_t curSP;
+    GrainInfo currentGrain;
     int fd;
     char *fileName;
-    uint8_t *grainBuffer;
-    uint64_t grainBufferNr;
-    uint32_t grainBufferValidStart;
-    uint32_t grainBufferValidEnd;
+    int compressionLevel;
 } SparseVmdkWriter;
 
 typedef struct {
@@ -337,34 +344,79 @@ isZeroed(const void *data,
 }
 
 static int
-fillGrain(StreamOptimizedDiskInfo *sodi)
+fillGrain(StreamOptimizedDiskInfo *sodi, GrainInfo *grain)
 {
     size_t lenBytes;
 
-    if (sodi->writer.grainBufferNr < sodi->writer.gtInfo.lastGrainNr) {
+    if (grain->bufferNr < sodi->writer.gtInfo.lastGrainNr) {
         lenBytes = sodi->diskHdr.grainSize * VMDK_SECTOR_SIZE;
-    } else if (sodi->writer.grainBufferNr == sodi->writer.gtInfo.lastGrainNr) {
+    } else if (grain->bufferNr == sodi->writer.gtInfo.lastGrainNr) {
         lenBytes = sodi->writer.gtInfo.lastGrainSize;
     } else {
         lenBytes = 0;
     }
-    if (sodi->writer.grainBufferValidStart == 0 &&
-        sodi->writer.grainBufferValidEnd >= lenBytes) {
+    if (grain->bufferValidStart == 0 &&
+        grain->bufferValidEnd >= lenBytes) {
         return 0;
     }
-    if (sodi->writer.gtInfo.gt[sodi->writer.grainBufferNr] != __cpu_to_le32(0)) {
+    if (sodi->writer.gtInfo.gt[grain->bufferNr] != __cpu_to_le32(0)) {
         fprintf(stderr, "Unimplemented read-modify-write.\n");
         return -1;
     }
-    if (sodi->writer.grainBufferValidStart != 0) {
-        memset(sodi->writer.grainBuffer, 0, sodi->writer.grainBufferValidStart);
-        sodi->writer.grainBufferValidStart = 0;
+    if (grain->bufferValidStart != 0) {
+        memset(grain->buffer, 0, grain->bufferValidStart);
+        grain->bufferValidStart = 0;
     }
-    if (sodi->writer.grainBufferValidEnd < lenBytes) {
-        memset(sodi->writer.grainBuffer + sodi->writer.grainBufferValidEnd, 0, lenBytes - sodi->writer.grainBufferValidEnd);
-        sodi->writer.grainBufferValidEnd = lenBytes;
+    if (grain->bufferValidEnd < lenBytes) {
+        memset(grain->buffer + grain->bufferValidEnd, 0, lenBytes - grain->bufferValidEnd);
+        grain->bufferValidEnd = lenBytes;
     }
     return 0;
+}
+
+static int
+deflateGrain(GrainInfo *grain)
+{
+    SparseGrainLBAHeaderOnDisk *grainHdr = grain->zlibBuffer.grainHdr;
+
+    if (deflateReset(&grain->zstream) != Z_OK) {
+        fprintf(stderr, "DeflateReset failed\n");
+        return -1;
+    }
+    grain->zstream.next_in = grain->buffer;
+    grain->zstream.avail_in = grain->bufferValidEnd;
+    grain->zstream.next_out = grain->zlibBuffer.data + sizeof *grainHdr;
+    grain->zstream.avail_out = grain->zlibBufferSize - sizeof *grainHdr;
+    if (deflate(&grain->zstream, Z_FINISH) != Z_STREAM_END) {
+        fprintf(stderr, "Deflate failed\n");
+        return -1;
+    }
+    return 0;
+}
+
+static ssize_t
+writeGrain(StreamOptimizedDiskInfo *sodi, GrainInfo *grain, uint32_t sp)
+{
+    size_t dataLen;
+    uint32_t rem;
+    SparseGrainLBAHeaderOnDisk *grainHdr = grain->zlibBuffer.grainHdr;
+
+    sodi->writer.gtInfo.gt[grain->bufferNr] = __cpu_to_le32(sp);
+
+    dataLen = grain->zstream.next_out - grain->zlibBuffer.data;
+    grainHdr->lba = grain->bufferNr * sodi->diskHdr.grainSize;
+    grainHdr->cmpSize = __cpu_to_le32(dataLen - sizeof *grainHdr);
+    rem = dataLen & (VMDK_SECTOR_SIZE - 1);
+    if (rem != 0) {
+        rem = VMDK_SECTOR_SIZE - rem;
+        memset(grain->zstream.next_out, 0, rem);
+        dataLen += rem;
+    }
+    if (!safePwrite(sodi->writer.fd, grainHdr, dataLen, sp * VMDK_SECTOR_SIZE)) {
+        return -1;
+    }
+
+    return dataLen;
 }
 
 static int
@@ -372,73 +424,60 @@ flushGrain(StreamOptimizedDiskInfo *sodi)
 {
     int ret;
     uint32_t oldLoc;
+    GrainInfo *grain = &sodi->writer.currentGrain;
 
-    if (sodi->writer.grainBufferNr == ~0ULL) {
+    if (grain->bufferNr == ~0ULL) {
         return 0;
     }
-    if (sodi->writer.grainBufferValidEnd == 0) {
+    if (grain->bufferValidEnd == 0) {
         return 0;
     }
-    ret = fillGrain(sodi);
+    ret = fillGrain(sodi, grain);
     if (ret) {
         return ret;
     }
 
-    oldLoc = __le32_to_cpu(sodi->writer.gtInfo.gt[sodi->writer.grainBufferNr]);
+    oldLoc = __le32_to_cpu(sodi->writer.gtInfo.gt[grain->bufferNr]);
     if (oldLoc != 0) {
         fprintf(stderr, "Cannot update already written grain\n");
         return -1;
     }
 
-    if (!isZeroed(sodi->writer.grainBuffer, sodi->writer.grainBufferValidEnd)) {
-        size_t dataLen;
-        uint32_t rem;
-        SparseGrainLBAHeaderOnDisk *grainHdr = sodi->writer.zlibBuffer.grainHdr;
+    if (!isZeroed(grain->buffer, grain->bufferValidEnd)) {
+        ssize_t dataLen;
 
-        sodi->writer.gtInfo.gt[sodi->writer.grainBufferNr] = __cpu_to_le32(sodi->writer.curSP);
-        if (deflateReset(&sodi->writer.zstream) != Z_OK) {
-            fprintf(stderr, "DeflateReset failed\n");
+        if (deflateGrain(grain) < 0) {
             return -1;
         }
-        sodi->writer.zstream.next_in = sodi->writer.grainBuffer;
-        sodi->writer.zstream.avail_in = sodi->writer.grainBufferValidEnd;
-        sodi->writer.zstream.next_out = sodi->writer.zlibBuffer.data + sizeof *grainHdr;
-        sodi->writer.zstream.avail_out = sodi->writer.zlibBufferSize - sizeof *grainHdr;
-        if (deflate(&sodi->writer.zstream, Z_FINISH) != Z_STREAM_END) {
-            fprintf(stderr, "Deflate failed\n");
-            return -1;
-        }
-        dataLen = sodi->writer.zstream.next_out - sodi->writer.zlibBuffer.data;
-        grainHdr->lba = sodi->writer.grainBufferNr * sodi->diskHdr.grainSize;
-        grainHdr->cmpSize = __cpu_to_le32(dataLen - sizeof *grainHdr);
-        rem = dataLen & (VMDK_SECTOR_SIZE - 1);
-        if (rem != 0) {
-            rem = VMDK_SECTOR_SIZE - rem;
-            memset(sodi->writer.zstream.next_out, 0, rem);
-            dataLen += rem;
-        }
-        if (!safePwrite(sodi->writer.fd, grainHdr, dataLen, sodi->writer.curSP * VMDK_SECTOR_SIZE)) {
-            return -1;
+        dataLen = writeGrain(sodi, grain, sodi->writer.curSP);
+        if (dataLen < 0) {
+            return dataLen;
         }
         sodi->writer.curSP += dataLen / VMDK_SECTOR_SIZE;
     }
     return 0;
 }
 
+static void
+resetGrain(GrainInfo *grain, uint64_t grainNr)
+{
+    grain->bufferNr = grainNr;
+    grain->bufferValidStart = 0;
+    grain->bufferValidEnd = 0;
+}
+
 static int
 prepareGrain(StreamOptimizedDiskInfo *sodi,
              uint64_t grainNr)
 {
-    if (grainNr != sodi->writer.grainBufferNr) {
+    if (grainNr != sodi->writer.currentGrain.bufferNr) {
         int ret;
 
         ret = flushGrain(sodi);
         if (ret < 0) {
             return ret;
         }
-        sodi->writer.grainBufferNr = grainNr;
-        sodi->writer.grainBufferValidStart = 0;
-        sodi->writer.grainBufferValidEnd = 0;
+        resetGrain(&sodi->writer.currentGrain, grainNr);
     }
     return 0;
 }
@@ -471,20 +510,20 @@ StreamOptimizedPwrite(DiskInfo *self,
             length -= updateLen;
         }
         updateEnd = updateStart + updateLen;
-        if (writer->grainBufferValidEnd == 0) {
+        if (writer->currentGrain.bufferValidEnd == 0) {
             ;
-        } else if (updateEnd < writer->grainBufferValidStart ||
-                   updateStart > writer->grainBufferValidEnd) {
-            if (fillGrain(sodi)) {
+        } else if (updateEnd < writer->currentGrain.bufferValidStart ||
+                   updateStart > writer->currentGrain.bufferValidEnd) {
+            if (fillGrain(sodi, &sodi->writer.currentGrain)) {
                 return -1;
             }
         }
-        memcpy(writer->grainBuffer + updateStart, buf8, updateLen);
-        if (updateStart < writer->grainBufferValidStart || writer->grainBufferValidEnd == 0) {
-            writer->grainBufferValidStart = updateStart;
+        memcpy(writer->currentGrain.buffer + updateStart, buf8, updateLen);
+        if (updateStart < writer->currentGrain.bufferValidStart || writer->currentGrain.bufferValidEnd == 0) {
+            writer->currentGrain.bufferValidStart = updateStart;
         }
-        if (updateEnd > writer->grainBufferValidEnd) {
-            writer->grainBufferValidEnd = updateEnd;
+        if (updateEnd > writer->currentGrain.bufferValidEnd) {
+            writer->currentGrain.bufferValidEnd = updateEnd;
         }
         buf8 += updateLen;
         grainNr++;
@@ -493,14 +532,181 @@ StreamOptimizedPwrite(DiskInfo *self,
     return buf8 - (const uint8_t *)buf;
 }
 
+static void
+freeGrain(GrainInfo *grain)
+{
+    deflateEnd(&grain->zstream);
+    if (grain->buffer)
+        free(grain->buffer);
+    if (grain->zlibBuffer.data)
+        free(grain->zlibBuffer.data);
+}
+
+static bool
+initGrain(StreamOptimizedDiskInfo *sodi, GrainInfo *grain)
+{
+    size_t maxOutSize;
+
+    grain->buffer = malloc(sodi->diskHdr.grainSize * VMDK_SECTOR_SIZE);
+    if (!grain->buffer) {
+        goto fail;
+    }
+    grain->bufferNr = ~0ULL;
+    grain->zstream.zalloc = NULL;
+    grain->zstream.zfree = NULL;
+    grain->zstream.opaque = &sodi->writer;
+    if (deflateInit(&grain->zstream, sodi->writer.compressionLevel) != Z_OK) {
+        goto failGrainBuffer;
+    }
+    maxOutSize = deflateBound(&grain->zstream, sodi->diskHdr.grainSize * VMDK_SECTOR_SIZE) + sizeof(SparseGrainLBAHeaderOnDisk);
+    maxOutSize = (maxOutSize + VMDK_SECTOR_SIZE - 1) & ~(VMDK_SECTOR_SIZE - 1);
+    grain->zlibBufferSize = maxOutSize;
+    grain->zlibBuffer.data = malloc(maxOutSize);
+    if (!grain->zlibBuffer.data) {
+        goto failDeflate;
+    }
+    return true;
+
+failDeflate:
+    deflateEnd(&grain->zstream);
+failGrainBuffer:
+    free(grain->buffer);
+fail:
+    return false;
+}
+
+typedef enum {
+    GT_STATE_FAILED = -1,
+    GT_STATE_RUNNING = 0,
+    GT_STATE_DONE = 1
+} GrainThreadState;
+
+typedef struct {
+    pthread_mutex_t readPosMutex;
+    pthread_mutex_t writeSPMutex;
+
+    StreamOptimizedDiskInfo *sodi;
+    DiskInfo *src;
+    off_t readPos;
+
+    GrainThreadState state;
+} GrainThreadContext;
+
+static void
+*deflateGrainThread(void *arg)
+{
+    GrainThreadContext *gtCtx = (GrainThreadContext *)arg;
+    GrainInfo grain = {0};
+    StreamOptimizedDiskInfo *sodi = gtCtx->sodi;
+    SparseExtentHeader *hdr = &sodi->diskHdr;
+    off_t capacity = gtCtx->src->vmt->getCapacity(gtCtx->src);
+    size_t length = capacity;
+
+    initGrain(sodi, &grain);
+
+    while (length > 0) {
+        off_t readPos;
+        size_t readLen;
+
+        pthread_mutex_lock(&gtCtx->readPosMutex);
+        readPos = gtCtx->readPos;
+        uint64_t grainNr = readPos / (hdr->grainSize * VMDK_SECTOR_SIZE);
+
+        resetGrain(&grain, grainNr);
+
+        length = capacity - readPos;
+        if (length <= 0) {
+            gtCtx->state = GT_STATE_DONE;
+            pthread_mutex_unlock(&gtCtx->readPosMutex);
+            break;
+        }
+
+        readLen = hdr->grainSize * VMDK_SECTOR_SIZE;
+        if (length < readLen) {
+            readLen = length;
+            length = 0;
+        } else {
+            length -= readLen;
+        }
+
+        /* forward readPos before reading and unlock,
+           so other threads get updated pos in the mean time */
+        gtCtx->readPos += readLen;
+
+        pthread_mutex_unlock(&gtCtx->readPosMutex);
+
+        if (gtCtx->src->vmt->pread(gtCtx->src, grain.buffer, readLen, readPos) != (ssize_t)readLen) {
+            goto fail;
+        }
+        grain.bufferValidEnd = readLen;
+
+        if (!isZeroed(grain.buffer, readLen)) {
+            uint32_t sp;
+            if (deflateGrain(&grain) < 0) {
+                goto fail;
+            }
+            ssize_t dataLen = grain.zstream.next_out - grain.zlibBuffer.data;
+            uint32_t rem = dataLen & (VMDK_SECTOR_SIZE - 1);
+            if (rem != 0) {
+                rem = VMDK_SECTOR_SIZE - rem;
+                dataLen += rem;
+            }
+
+            pthread_mutex_lock(&gtCtx->writeSPMutex);
+            sp = sodi->writer.curSP;
+            sodi->writer.curSP += dataLen / VMDK_SECTOR_SIZE;
+            pthread_mutex_unlock(&gtCtx->writeSPMutex);
+
+            if((dataLen = writeGrain(sodi, &grain, sp)) < 0) {
+                goto fail;
+            }
+        }
+    }
+    if (length == 0)
+        gtCtx->state = GT_STATE_DONE;
+fail:
+    if (length > 0)
+        gtCtx->state = GT_STATE_FAILED;
+    freeGrain(&grain);
+    return arg;
+}
+
+static ssize_t
+StreamOptimizedCopyDisk(DiskInfo *src,
+                        DiskInfo *self,
+                        int numThreads)
+{
+    StreamOptimizedDiskInfo *sodi = getSODI(self);
+    GrainThreadContext gtCtx = {0};
+    pthread_t threads[numThreads];
+    int i;
+
+    pthread_mutex_init(&gtCtx.readPosMutex, NULL);
+    pthread_mutex_init(&gtCtx.writeSPMutex, NULL);
+    gtCtx.sodi = sodi;
+    gtCtx.src = src;
+    gtCtx.readPos = 0;
+    gtCtx.state = GT_STATE_RUNNING;
+
+    for (i = 0; i < numThreads; i++) {
+        pthread_create(&threads[i], NULL, deflateGrainThread, (void *)&gtCtx);
+    }
+
+    for (i = 0; i < numThreads; i++) {
+        pthread_join(threads[i], NULL);
+    }
+
+    return gtCtx.state == GT_STATE_DONE ? gtCtx.readPos : -1;
+}
+
 static bool
 writeSpecial(SparseVmdkWriter *writer,
              uint32_t marker,
              SectorType length)
 {
-    SparseSpecialLBAHeaderOnDisk *specialHdr = writer->zlibBuffer.specialHdr;
+    SparseSpecialLBAHeaderOnDisk *specialHdr = writer->currentGrain.zlibBuffer.specialHdr;
 
-    memset(writer->zlibBuffer.data, 0, VMDK_SECTOR_SIZE);
+    memset(writer->currentGrain.zlibBuffer.data, 0, VMDK_SECTOR_SIZE);
     specialHdr->lba = __cpu_to_le64(length);
     specialHdr->type = __cpu_to_le32(marker);
     return safePwrite(writer->fd, specialHdr, VMDK_SECTOR_SIZE, writer->curSP * VMDK_SECTOR_SIZE);
@@ -518,10 +724,10 @@ StreamOptimizedFinalize(StreamOptimizedDiskInfo *sodi)
     int ret;
 
     ret = close(sodi->writer.fd);
-    deflateEnd(&sodi->writer.zstream);
+    deflateEnd(&sodi->writer.currentGrain.zstream);
     free(sodi->writer.gtInfo.gd);
-    free(sodi->writer.grainBuffer);
-    free(sodi->writer.zlibBuffer.data);
+    free(sodi->writer.currentGrain.buffer);
+    free(sodi->writer.currentGrain.zlibBuffer.data);
     free(sodi->writer.fileName);
     free(sodi);
     return ret;
@@ -595,14 +801,14 @@ failAll:
 static DiskInfoVMT streamOptimizedVMT = {
     .pwrite = StreamOptimizedPwrite,
     .close = StreamOptimizedClose,
-    .abort = StreamOptimizedAbort
+    .abort = StreamOptimizedAbort,
+    .copyDisk = StreamOptimizedCopyDisk
 };
 
 DiskInfo *
 StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLevel)
 {
     StreamOptimizedDiskInfo *sodi;
-    size_t maxOutSize;
 
     sodi = malloc(sizeof *sodi);
     if (!sodi) {
@@ -628,44 +834,25 @@ StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLeve
     if (sodi->writer.fd == -1) {
         goto failGDGT;
     }
+    sodi->writer.compressionLevel = compressionLevel;
+
     sodi->diskHdr.descriptorOffset = sodi->diskHdr.overHead;
     sodi->diskHdr.descriptorSize = 20;
     sodi->diskHdr.overHead = sodi->diskHdr.overHead + sodi->diskHdr.descriptorSize;
     sodi->diskHdr.gdOffset = sodi->diskHdr.overHead;
     sodi->diskHdr.overHead += sodi->writer.gtInfo.GDsectors;
     sodi->diskHdr.overHead = prefillGD(&sodi->writer.gtInfo, sodi->diskHdr.overHead);
+
+    initGrain(sodi, &sodi->writer.currentGrain);
+
     sodi->writer.curSP = sodi->diskHdr.overHead;
-    sodi->writer.grainBuffer = malloc(sodi->diskHdr.grainSize * VMDK_SECTOR_SIZE);
-    if (!sodi->writer.grainBuffer) {
-        goto failFD;
-    }
-    sodi->writer.grainBufferNr = ~0ULL;
-    sodi->writer.zstream.zalloc = NULL;
-    sodi->writer.zstream.zfree = NULL;
-    sodi->writer.zstream.opaque = &sodi->writer;
-    if (deflateInit(&sodi->writer.zstream, compressionLevel) != Z_OK) {
-        goto failGrainBuffer;
-    }
-    maxOutSize = deflateBound(&sodi->writer.zstream, sodi->diskHdr.grainSize * VMDK_SECTOR_SIZE) + sizeof(SparseGrainLBAHeaderOnDisk);
-    maxOutSize = (maxOutSize + VMDK_SECTOR_SIZE - 1) & ~(VMDK_SECTOR_SIZE - 1);
-    sodi->writer.zlibBufferSize = maxOutSize;
-    sodi->writer.zlibBuffer.data = malloc(maxOutSize);
-    if (!sodi->writer.zlibBuffer.data) {
-        goto failDeflate;
-    }
     if (lseek(sodi->writer.fd, sodi->writer.curSP * VMDK_SECTOR_SIZE, SEEK_SET) == -1) {
         goto failAll;
     }
     return &sodi->hdr;
 
 failAll:
-    free(sodi->writer.zlibBuffer.data);
-failDeflate:
-    deflateEnd(&sodi->writer.zstream);
-failGrainBuffer:
-    free(sodi->writer.grainBuffer);
-failFD:
-    close(sodi->writer.fd);
+    free(sodi->writer.currentGrain.zlibBuffer.data);
 failGDGT:
     free(sodi->writer.gtInfo.gd);
 failFileName:
