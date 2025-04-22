@@ -252,13 +252,8 @@ main(int argc,
             if (tgt == NULL) {
                 fprintf(stderr, "Cannot open target disk %s: %s\n", filename, strerror(errno));
             } else {
-<<<<<<< HEAD
-                printf("Starting to convert %s to %s using compression level %d\n", src, filename, compressionLevel);
-                if (copyDisk(di, tgt)) {
-=======
                 printf("Starting to convert %s to %s using compression level %d and %d threads\n", src, filename, compressionLevel, numThreads);
                 if (copyDisk(di, tgt, numThreads)) {
->>>>>>> b955bfd (Add multithreaded compression.)
                     printf("Success\n");
                 } else {
                     fprintf(stderr, "Failure!\n");
