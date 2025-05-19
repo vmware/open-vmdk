@@ -96,12 +96,17 @@ printUsage(char *cmd)
     return 1;
 }
 
-/* Check a string is number */
+/* Check if string is a number */
 static bool
 isNumber(const char *text)
 {
     int j;
     j = strlen(text);
+
+    /* an empty string is not a number */
+    if (j <= 0)
+        return false;
+
     while(j--)
     {
         if(text[j] >= '0' && text[j] <= '9')
@@ -134,7 +139,7 @@ main(int argc,
         }
     }
 
-    while ((opt = getopt(argc, argv, "it:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:it:")) != -1) {
         switch (opt) {\
         case 'c':
             compressionLevel = atoi(optarg);
@@ -203,7 +208,7 @@ main(int argc,
             if (tgt == NULL) {
                 fprintf(stderr, "Cannot open target disk %s: %s\n", filename, strerror(errno));
             } else {
-                printf("Starting to convert %s to %s...\n", src, filename);
+                printf("Starting to convert %s to %s using compression level %d\n", src, filename, compressionLevel);
                 if (copyDisk(di, tgt)) {
                     printf("Success\n");
                 } else {
