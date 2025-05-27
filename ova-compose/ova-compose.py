@@ -868,7 +868,7 @@ class VmwExtraConfigItem(object):
 
         attrs = {'{%s}key' % NS_VMW: self.key, '{%s}value' % NS_VMW: value}
         if self.required is not None:
-            attrs['{%s}required' % NS_VMW] = "true" if self.required else "false"
+            attrs['{%s}required' % NS_OVF] = "true" if self.required else "false"
         elem = ET.Element('{%s}ExtraConfig' % NS_VMW, attrs)
         return elem
 
