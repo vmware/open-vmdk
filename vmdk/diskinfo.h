@@ -29,6 +29,7 @@ typedef struct {
     int (*nextData)(DiskInfo *self, off_t *pos, off_t *end);
     int (*close)(DiskInfo *self);
     int (*abort)(DiskInfo *self);
+    ssize_t (*copyDisk)(DiskInfo *self, DiskInfo *src, int numThreads);
 } DiskInfoVMT;
 
 struct DiskInfo {
