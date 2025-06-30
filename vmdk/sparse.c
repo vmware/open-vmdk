@@ -639,6 +639,15 @@ static void
         pthread_mutex_lock(&gtCtx->readPosMutex);
         readPos = gtCtx->readPos;
 
+        // Check if another thread has failed - exit early to avoid wasted work
+        pthread_mutex_lock(&gtCtx->stateMutex);
+        if (gtCtx->state == GT_STATE_FAILED) {
+            pthread_mutex_unlock(&gtCtx->stateMutex);
+            pthread_mutex_unlock(&gtCtx->readPosMutex);
+            break;
+        }
+        pthread_mutex_unlock(&gtCtx->stateMutex);
+
         // Check if all work is done globally
         if (readPos >= capacity) {
             pthread_mutex_lock(&gtCtx->stateMutex);
