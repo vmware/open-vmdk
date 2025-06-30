@@ -601,22 +601,21 @@ static void
     StreamOptimizedDiskInfo *sodi = gtCtx->sodi;
     SparseExtentHeader *hdr = &sodi->diskHdr;
     off_t capacity = gtCtx->src->vmt->getCapacity(gtCtx->src);
-    size_t length = capacity;
 
-    initGrain(sodi, &grain);
+    if (initGrain(sodi, &grain) == false) {
+        goto fail;
+    }
 
-    while (length > 0) {
+    while (true) {
         off_t readPos;
         size_t readLen;
+        off_t remaining;
 
         pthread_mutex_lock(&gtCtx->readPosMutex);
         readPos = gtCtx->readPos;
-        uint64_t grainNr = readPos / (hdr->grainSize * VMDK_SECTOR_SIZE);
 
-        resetGrain(&grain, grainNr);
-
-        length = capacity - readPos;
-        if (length <= 0) {
+        // Check if all work is done globally
+        if (readPos >= capacity) {
             pthread_mutex_lock(&gtCtx->stateMutex);
             gtCtx->state = GT_STATE_DONE;
             pthread_mutex_unlock(&gtCtx->stateMutex);
@@ -624,25 +623,29 @@ static void
             break;
         }
 
+        // Calculate how much this thread should read
+        remaining = capacity - readPos;
         readLen = hdr->grainSize * VMDK_SECTOR_SIZE;
-        if (length < readLen) {
-            readLen = length;
-            length = 0;
-        } else {
-            length -= readLen;
+        if (remaining < (off_t)readLen) {
+            readLen = (size_t)remaining;
         }
 
-        /* forward readPos before reading and unlock,
+        uint64_t grainNr = readPos / (hdr->grainSize * VMDK_SECTOR_SIZE);
+        resetGrain(&grain, grainNr);
+
+        /* Advance global position before reading and unlock,
            so other threads get updated pos in the mean time */
         gtCtx->readPos += readLen;
 
         pthread_mutex_unlock(&gtCtx->readPosMutex);
 
+        // Read data from source
         if (gtCtx->src->vmt->pread(gtCtx->src, grain.buffer, readLen, readPos) != (ssize_t)readLen) {
             goto fail;
         }
         grain.bufferValidEnd = readLen;
 
+        // Process non-zero data
         if (!isZeroed(grain.buffer, readLen)) {
             uint32_t sp;
             if (deflateGrain(&grain) < 0) {
@@ -665,17 +668,14 @@ static void
             }
         }
     }
-    if (length == 0) {
-        pthread_mutex_lock(&gtCtx->stateMutex);
-        gtCtx->state = GT_STATE_DONE;
-        pthread_mutex_unlock(&gtCtx->stateMutex);
-    }
+
+    freeGrain(&grain);
+    return arg;
+
 fail:
-    if (length > 0) {
-        pthread_mutex_lock(&gtCtx->stateMutex);
-        gtCtx->state = GT_STATE_FAILED;
-        pthread_mutex_unlock(&gtCtx->stateMutex);
-    }
+    pthread_mutex_lock(&gtCtx->stateMutex);
+    gtCtx->state = GT_STATE_FAILED;
+    pthread_mutex_unlock(&gtCtx->stateMutex);
     freeGrain(&grain);
     return arg;
 }
