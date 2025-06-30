@@ -690,25 +690,29 @@ StreamOptimizedCopyDisk(DiskInfo *src,
     pthread_t threads[numThreads];
     int i, ret;
     int threadsCreated = 0;
+    ssize_t result = -1;
+    bool readPosMutexInit = false;
+    bool writeSPMutexInit = false;
+    bool stateMutexInit = false;
 
     // Initialize mutexes with error checking
     if ((ret = pthread_mutex_init(&gtCtx.readPosMutex, NULL)) != 0) {
         fprintf(stderr, "Failed to initialize readPosMutex: %s\n", strerror(ret));
-        return -1;
+        goto cleanup;
     }
+    readPosMutexInit = true;
 
     if ((ret = pthread_mutex_init(&gtCtx.writeSPMutex, NULL)) != 0) {
         fprintf(stderr, "Failed to initialize writeSPMutex: %s\n", strerror(ret));
-        pthread_mutex_destroy(&gtCtx.readPosMutex);
-        return -1;
+        goto cleanup;
     }
+    writeSPMutexInit = true;
 
     if ((ret = pthread_mutex_init(&gtCtx.stateMutex, NULL)) != 0) {
         fprintf(stderr, "Failed to initialize stateMutex: %s\n", strerror(ret));
-        pthread_mutex_destroy(&gtCtx.readPosMutex);
-        pthread_mutex_destroy(&gtCtx.writeSPMutex);
-        return -1;
+        goto cleanup;
     }
+    stateMutexInit = true;
 
     gtCtx.sodi = sodi;
     gtCtx.src = src;
@@ -738,17 +742,24 @@ StreamOptimizedCopyDisk(DiskInfo *src,
         }
     }
 
-    // Clean up mutexes
-    pthread_mutex_destroy(&gtCtx.readPosMutex);
-    pthread_mutex_destroy(&gtCtx.writeSPMutex);
-    pthread_mutex_destroy(&gtCtx.stateMutex);
-
-    // Return error if we couldn't create all threads or if processing failed
-    if (threadsCreated < numThreads) {
-        return -1;
+    // Determine result
+    if (threadsCreated == numThreads && gtCtx.state == GT_STATE_DONE) {
+        result = gtCtx.readPos;
     }
 
-    return gtCtx.state == GT_STATE_DONE ? gtCtx.readPos : -1;
+cleanup:
+    // Destroy mutexes in reverse order of initialization
+    if (stateMutexInit) {
+        pthread_mutex_destroy(&gtCtx.stateMutex);
+    }
+    if (writeSPMutexInit) {
+        pthread_mutex_destroy(&gtCtx.writeSPMutex);
+    }
+    if (readPosMutexInit) {
+        pthread_mutex_destroy(&gtCtx.readPosMutex);
+    }
+
+    return result;
 }
 
 static bool
