@@ -688,27 +688,65 @@ StreamOptimizedCopyDisk(DiskInfo *src,
     StreamOptimizedDiskInfo *sodi = getSODI(self);
     GrainThreadContext gtCtx = {0};
     pthread_t threads[numThreads];
-    int i;
+    int i, ret;
+    int threadsCreated = 0;
 
-    pthread_mutex_init(&gtCtx.readPosMutex, NULL);
-    pthread_mutex_init(&gtCtx.writeSPMutex, NULL);
-    pthread_mutex_init(&gtCtx.stateMutex, NULL);
+    // Initialize mutexes with error checking
+    if ((ret = pthread_mutex_init(&gtCtx.readPosMutex, NULL)) != 0) {
+        fprintf(stderr, "Failed to initialize readPosMutex: %s\n", strerror(ret));
+        return -1;
+    }
+
+    if ((ret = pthread_mutex_init(&gtCtx.writeSPMutex, NULL)) != 0) {
+        fprintf(stderr, "Failed to initialize writeSPMutex: %s\n", strerror(ret));
+        pthread_mutex_destroy(&gtCtx.readPosMutex);
+        return -1;
+    }
+
+    if ((ret = pthread_mutex_init(&gtCtx.stateMutex, NULL)) != 0) {
+        fprintf(stderr, "Failed to initialize stateMutex: %s\n", strerror(ret));
+        pthread_mutex_destroy(&gtCtx.readPosMutex);
+        pthread_mutex_destroy(&gtCtx.writeSPMutex);
+        return -1;
+    }
+
     gtCtx.sodi = sodi;
     gtCtx.src = src;
     gtCtx.readPos = 0;
     gtCtx.state = GT_STATE_RUNNING;
 
+    // Create threads with error checking
     for (i = 0; i < numThreads; i++) {
-        pthread_create(&threads[i], NULL, deflateGrainThread, (void *)&gtCtx);
+        ret = pthread_create(&threads[i], NULL, deflateGrainThread, (void *)&gtCtx);
+        if (ret != 0) {
+            fprintf(stderr, "Failed to create thread %d: %s\n", i, strerror(ret));
+            // Set state to failed to signal existing threads to exit
+            pthread_mutex_lock(&gtCtx.stateMutex);
+            gtCtx.state = GT_STATE_FAILED;
+            pthread_mutex_unlock(&gtCtx.stateMutex);
+            break;
+        }
+        threadsCreated++;
     }
 
-    for (i = 0; i < numThreads; i++) {
-        pthread_join(threads[i], NULL);
+    // Wait for all created threads to finish
+    for (i = 0; i < threadsCreated; i++) {
+        ret = pthread_join(threads[i], NULL);
+        if (ret != 0) {
+            fprintf(stderr, "Failed to join thread %d: %s\n", i, strerror(ret));
+            // Continue trying to join remaining threads
+        }
     }
 
+    // Clean up mutexes
     pthread_mutex_destroy(&gtCtx.readPosMutex);
     pthread_mutex_destroy(&gtCtx.writeSPMutex);
     pthread_mutex_destroy(&gtCtx.stateMutex);
+
+    // Return error if we couldn't create all threads or if processing failed
+    if (threadsCreated < numThreads) {
+        return -1;
+    }
 
     return gtCtx.state == GT_STATE_DONE ? gtCtx.readPos : -1;
 }
