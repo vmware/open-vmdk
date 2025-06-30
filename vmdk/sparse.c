@@ -584,6 +584,7 @@ typedef enum {
 typedef struct {
     pthread_mutex_t readPosMutex;
     pthread_mutex_t writeSPMutex;
+    pthread_mutex_t stateMutex;
 
     StreamOptimizedDiskInfo *sodi;
     DiskInfo *src;
@@ -616,7 +617,9 @@ static void
 
         length = capacity - readPos;
         if (length <= 0) {
+            pthread_mutex_lock(&gtCtx->stateMutex);
             gtCtx->state = GT_STATE_DONE;
+            pthread_mutex_unlock(&gtCtx->stateMutex);
             pthread_mutex_unlock(&gtCtx->readPosMutex);
             break;
         }
@@ -662,11 +665,17 @@ static void
             }
         }
     }
-    if (length == 0)
+    if (length == 0) {
+        pthread_mutex_lock(&gtCtx->stateMutex);
         gtCtx->state = GT_STATE_DONE;
+        pthread_mutex_unlock(&gtCtx->stateMutex);
+    }
 fail:
-    if (length > 0)
+    if (length > 0) {
+        pthread_mutex_lock(&gtCtx->stateMutex);
         gtCtx->state = GT_STATE_FAILED;
+        pthread_mutex_unlock(&gtCtx->stateMutex);
+    }
     freeGrain(&grain);
     return arg;
 }
@@ -683,6 +692,7 @@ StreamOptimizedCopyDisk(DiskInfo *src,
 
     pthread_mutex_init(&gtCtx.readPosMutex, NULL);
     pthread_mutex_init(&gtCtx.writeSPMutex, NULL);
+    pthread_mutex_init(&gtCtx.stateMutex, NULL);
     gtCtx.sodi = sodi;
     gtCtx.src = src;
     gtCtx.readPos = 0;
@@ -695,6 +705,10 @@ StreamOptimizedCopyDisk(DiskInfo *src,
     for (i = 0; i < numThreads; i++) {
         pthread_join(threads[i], NULL);
     }
+
+    pthread_mutex_destroy(&gtCtx.readPosMutex);
+    pthread_mutex_destroy(&gtCtx.writeSPMutex);
+    pthread_mutex_destroy(&gtCtx.stateMutex);
 
     return gtCtx.state == GT_STATE_DONE ? gtCtx.readPos : -1;
 }
