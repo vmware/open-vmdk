@@ -83,7 +83,7 @@ import tempfile
 
 import gettext
 
-__t = gettext.translation('ovfenv', '/opt/vmware/lib/locale', fallback=True)
+__t = gettext.translation('ovfenv', '/usr/share/locale', fallback=True)
 _ = __t.ugettext if sys.version_info[0] < 3 else __t.gettext
 
 debug = False
@@ -117,7 +117,7 @@ UNMOUNTCD         = ["/bin/umount"]
 #
 OVFENV            = "ovf-env.xml"
 CDDRIVES          = "/proc/sys/dev/cdrom/info"
-STUDIOENVCOPY     = "/opt/vmware/etc/vami/ovfEnv.xml"
+STUDIOENVCOPY     = "/var/lib/ovfenv/ovfEnv.xml"
 
 
 #
