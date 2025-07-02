@@ -57,7 +57,9 @@ static int vmdk_getattr(const char *path, struct stat *stbuf,
     if(strcmp(path, "/") != 0)
         return -ENOENT;
 
-    stat(vmdk_path, &st);
+    if (stat(vmdk_path, &st) != 0) {
+        return -errno;
+    }
 
     stbuf->st_mode = st.st_mode;
     stbuf->st_nlink = 1;
@@ -92,10 +94,14 @@ static int vmdk_open(const char *path, struct fuse_file_info *fi)
         return -ENOENT;
 
     struct vmdk_data *data = (struct vmdk_data *)fuse_get_context()->private_data;
+    if (data == NULL) {
+        return -EINVAL;  // Invalid configuration
+    }
+
     DiskInfo *di = Sparse_Open(data->options.vmdk_path);
     if (di == NULL) {
         fprintf(stderr, "could not read %s\n", data->options.vmdk_path);
-        return -EIO;
+        return -EINVAL;  // File exists but invalid VMDK format
     }
 
     fi->fh = (uint64_t)di;
@@ -110,7 +116,7 @@ static int vmdk_release(const char *path, struct fuse_file_info *fi)
 
     DiskInfo *di = (DiskInfo *)(fi->fh);
     if (di == NULL)
-        return -EIO;
+        return -EINVAL;  // Invalid file handle
 
     di->vmt->close(di);
 
@@ -125,12 +131,15 @@ static int vmdk_read(const char *path, char *buf, size_t size,
 
     DiskInfo *di = (DiskInfo *)(fi->fh);
     if (di == NULL)
-        return -EIO;
+        return -EINVAL;  // Invalid file handle
+
+    if (buf == NULL)
+        return -EINVAL;  // Invalid buffer
 
     ssize_t ret;
     if ((ret = di->vmt->pread(di, (void *)buf, size, offset)) < 0) {
         fprintf(stderr, "pread failed: %d (%s)\n", errno, strerror(errno));
-        return -EIO;
+        return -errno;  // Return the actual error from pread
     }
 
     return ret;
@@ -163,10 +172,15 @@ int vmdk_init(struct vmdk_data *data)
 {
     DiskInfo *di;
 
+    if (data == NULL || data->options.vmdk_path == NULL) {
+        fprintf(stderr, "Invalid data or vmdk_path\n");
+        return -EINVAL;
+    }
+
     di = Sparse_Open(data->options.vmdk_path);
     if (di == NULL) {
         fprintf(stderr, "could not read %s\n", data->options.vmdk_path);
-        return 1;
+        return -EINVAL;  // File exists but invalid VMDK format
     }
     data->capacity = di->vmt->getCapacity(di);
     di->vmt->close(di);
@@ -178,12 +192,17 @@ static
 int vmdk_opt_proc(void *data, const char *arg,
                   int key, struct fuse_args *outargs)
 {
+    (void) outargs;
     struct vmdk_data *vmdk_data = (struct vmdk_data *)data;
 
     switch (key) {
     case FUSE_OPT_KEY_NONOPT:
         if (vmdk_data->options.vmdk_path == NULL) {
             vmdk_data->options.vmdk_path = strdup(arg);
+            if (vmdk_data->options.vmdk_path == NULL) {
+                fprintf(stderr, "Memory allocation failed for vmdk_path\n");
+                return -ENOMEM;  // Out of memory
+            }
             return 0;
         }
         return 1;
@@ -199,18 +218,27 @@ int main(int argc, char *argv[])
     int argc_saved;
     char **argv_saved;
 
-    if (fuse_opt_parse(&args, &data, option_spec, vmdk_opt_proc) == -1)
-            return 1;
+    if (fuse_opt_parse(&args, &data, option_spec, vmdk_opt_proc) == -1) {
+        fuse_opt_free_args(&args);
+        if (data.options.vmdk_path) {
+            free(data.options.vmdk_path);
+        }
+        return 1;
+    }
 
     if (!data.options.vmdk_path) {
         fprintf(stderr, "missing vmdk file parameter (file=)\n");
-        return 1;        
+        return 1;
     } else {
         char *tmp = data.options.vmdk_path;
         data.options.vmdk_path = realpath(data.options.vmdk_path, NULL);
+        if (data.options.vmdk_path == NULL) {
+            fprintf(stderr, "failed to resolve vmdk file path: %s\n", strerror(errno));
+            free(tmp);
+            return 1;
+        }
         free(tmp);
     }
-
     if (stat(data.options.vmdk_path, &stbuf) == -1) {
         fprintf(stderr ,"failed to access vmdk file %s: %s\n",
             data.options.vmdk_path, strerror(errno));
@@ -219,6 +247,7 @@ int main(int argc, char *argv[])
     }
     if (!S_ISREG(stbuf.st_mode)) {
         fprintf(stderr, "vmdk file %s is not a regular file\n", data.options.vmdk_path);
+        free(data.options.vmdk_path);
         return 1;
     }
 
@@ -226,8 +255,14 @@ int main(int argc, char *argv[])
     argv_saved = args.argv;
 
     if (vmdk_init(&data) != 0) {
+        free(data.options.vmdk_path);
         return 1;
     }
 
-    return fuse_main(argc_saved, argv_saved, &vmdk_oper, (void *)&data);
+    int ret = fuse_main(argc_saved, argv_saved, &vmdk_oper, (void *)&data);
+
+    // Clean up resources
+    free(data.options.vmdk_path);
+    fuse_opt_free_args(&args);
+    return ret;
 }
