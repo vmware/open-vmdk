@@ -249,6 +249,7 @@ main(int argc,
     }
     if (di == NULL) {
         fprintf(stderr, "Cannot open source disk %s: %s\n", src, strerror(errno));
+        exit(1);
     } else {
         if (doInfo) {
             off_t capacity = di->vmt->getCapacity(di);
@@ -313,12 +314,15 @@ main(int argc,
 
             if (tgt == NULL) {
                 fprintf(stderr, "Cannot open target disk %s: %s\n", filename, strerror(errno));
+                di->vmt->close(di);
+                exit(1);
             } else {
                 printf("Starting to convert %s to %s using compression level %d and %d threads\n", src, filename, compressionLevel, numThreads);
                 if (copyDisk(di, tgt, numThreads)) {
                     printf("Success\n");
                 } else {
                     fprintf(stderr, "Failure!\n");
+                    exit(1);
                 }
             }
         }

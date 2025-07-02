@@ -181,8 +181,8 @@ def test_info_option_nonexistent_file(setup_test):
     """Test -i option with nonexistent file"""
     process = subprocess.run([VMDK_CONVERT, "-i", "nonexistent.vmdk"], 
                            cwd=WORK_DIR, capture_output=True, text=True)
-    # The application prints error to stderr but still returns 0
-    assert process.returncode == 0
+    # The application should now exit with code 1 on errors
+    assert process.returncode == 1
     assert "Cannot open source disk" in process.stderr
     assert process.stdout.strip() == ""  # No output to stdout when file can't be opened
 
