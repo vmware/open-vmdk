@@ -52,6 +52,94 @@ jobs:
                   git commit -m "update poi/open-vmdk to ${GITHUB_SHA::7} for testing branch ${{ github.ref_name }}"
                   git push origin ${BRANCH_NAME}
 
+            - name: Wait for and monitor cayman-poi workflow
+              env:
+                  GITHUB_TOKEN: ${{ secrets.PAT_POI_CICD_RO }}
+              run: |
+                  BRANCH_NAME="test/openvmdk-submodule/${GITHUB_SHA::7}"
+                  echo "Monitoring branch: $BRANCH_NAME"
+
+                  # Function to get workflow runs for the branch
+                  get_workflow_runs() {
+                      curl -s \
+                          -H "Accept: application/vnd.github+json" \
+                          -H "Authorization: Bearer $GITHUB_TOKEN" \
+                          -H "X-GitHub-Api-Version: 2022-11-28" \
+                          "https://github-vcf.devops.broadcom.net/api/v3/repos/vcf/cayman-poi/actions/runs?branch=$BRANCH_NAME" \
+                          | jq -r '.workflow_runs[] | select(.head_branch == "'$BRANCH_NAME'") | "\(.id) \(.status) \(.conclusion // "null") \(.created_at)"'
+                  }
+
+                  # Wait for workflow to start (up to 5 minutes)
+                  echo "Waiting for workflow to start on branch $BRANCH_NAME..."
+                  timeout=300
+                  interval=30
+                  elapsed=0
+
+                  while [ $elapsed -lt $timeout ]; do
+                      runs=$(get_workflow_runs)
+                      if [ -n "$runs" ]; then
+                          echo "Workflow detected:"
+                          echo "$runs"
+                          break
+                      fi
+                      echo "No workflow found yet, waiting ${interval}s..."
+                      sleep $interval
+                      elapsed=$((elapsed + interval))
+                  done
+
+                  if [ $elapsed -ge $timeout ]; then
+                      echo "ERROR: No workflow was triggered within $timeout seconds"
+                      exit 1
+                  fi
+
+                  # Get the workflow run ID (first field from the output)
+                  run_id=$(echo "$runs" | head -1 | cut -d' ' -f1)
+                  echo "Monitoring workflow run ID: $run_id"
+
+                  # Monitor workflow status (up to 30 minutes)
+                  timeout=1800
+                  interval=60
+                  elapsed=0
+
+                  while [ $elapsed -lt $timeout ]; do
+                      run_info=$(curl -s \
+                          -H "Accept: application/vnd.github+json" \
+                          -H "Authorization: Bearer $GITHUB_TOKEN" \
+                          -H "X-GitHub-Api-Version: 2022-11-28" \
+                          "https://github-vcf.devops.broadcom.net/api/v3/repos/vcf/cayman-poi/actions/runs/$run_id")
+
+                      status=$(echo "$run_info" | jq -r '.status')
+                      conclusion=$(echo "$run_info" | jq -r '.conclusion // "null"')
+                      url=$(echo "$run_info" | jq -r '.html_url')
+
+                      echo "Workflow status: $status, conclusion: $conclusion"
+
+                      if [ "$status" = "completed" ]; then
+                          echo "Workflow completed with conclusion: $conclusion"
+                          echo "Workflow URL: $url"
+
+                          if [ "$conclusion" = "success" ]; then
+                              echo "✅ Cayman POI workflow succeeded!"
+                              exit 0
+                          elif [ "$conclusion" = "null" ]; then
+                              echo "❌ Cayman POI workflow completed but conclusion is null"
+                              echo "Check the workflow at: $url"
+                              exit 1
+                          else
+                              echo "❌ Cayman POI workflow failed with conclusion: $conclusion"
+                              echo "Check the workflow at: $url"
+                              exit 1
+                          fi
+                      fi
+
+                      sleep $interval
+                      elapsed=$((elapsed + interval))
+                  done
+
+                  echo "ERROR: Workflow did not complete within $timeout seconds"
+                  echo "Workflow URL: $url"
+                  exit 1
+
     pytest:
         runs-on: self-hosted
         steps:
