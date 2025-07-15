@@ -1,5 +1,7 @@
 Summary:       Tools to create OVA files from raw disk images
 Name:          open-vmdk
+# keep the version one step ahead to downstream package,
+# but set release to 0.
 Version:       0.3.12
 Release:       0%{?dist}
 Vendor:        VMware, Inc.
@@ -49,9 +51,15 @@ Optionally, allows a property value to be modified.
 %make_install
 install -d -m 755 %{buildroot}%{_datadir}/%{name}
 install templates/*.ovf %{buildroot}%{_datadir}/%{name}
+install -d -m 755 %{buildroot}%{_sharedstatedir}/ovfenv
 
 %clean
 rm -rf %{buildroot}/*
+
+%post -n ovfenv
+if [ -f /opt/vmware/etc/vami/ovfEnv.xml -a ! -f %{_sharedstatedir}/ovfenv/ovfEnv.xml ] ; then
+    mv /opt/vmware/etc/vami/ovfEnv.xml %{_sharedstatedir}/ovfenv/ovfEnv.xml
+fi
 
 %files
 %defattr(-,root,root)
@@ -64,8 +72,11 @@ rm -rf %{buildroot}/*
 %files -n ovfenv
 %defattr(-,root,root)
 %{_bindir}/ovfenv
+%dir %{_sharedstatedir}/ovfenv
 
 %changelog
+* Wed Jul 02 2025 Oliver Kurth <oliver.kurth@broadcom.com> 0.3.12-0
+- update to 0.3.12
 * Fri Jun 21 2024 Oliver Kurth <oliver.kurth@broadcom.com> 0.3.11-1
 - update to 0.3.11
 * Fri Jun 21 2024 Oliver Kurth <oliver.kurth@broadcom.com> 0.3.10-0
