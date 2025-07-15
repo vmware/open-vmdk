@@ -39,9 +39,20 @@ jobs:
 
             - name: create branch and push
               run: |
-                  BRANCH_NAME=test/openvmdk-submodule/${GITHUB_SHA::7}
                   cd ./cayman-poi
-                  git checkout -b ${BRANCH_NAME}
+                  BRANCH_NAME=test/openvmdk-submodule/${GITHUB_SHA::7}
+
+                  if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+                      echo "Branch $BRANCH_NAME already exists locally, switching to it"
+                      git checkout "$BRANCH_NAME"
+                  elif git show-ref --verify --quiet "refs/remotes/origin/$BRANCH_NAME"; then
+                      echo "Branch $BRANCH_NAME exists remotely, checking it out"
+                      git checkout -b "$BRANCH_NAME" "origin/$BRANCH_NAME"
+                  else
+                      echo "Branch $BRANCH_NAME does not exist, creating it"
+                      git checkout -b "$BRANCH_NAME"
+                  fi
+
                   pushd poi/open-vmdk
                   git fetch
                   git checkout ${GITHUB_SHA::7}
@@ -49,7 +60,14 @@ jobs:
                   git add poi/open-vmdk
                   git config --global user.email "poi-cicd@broadcom.com"
                   git config --global user.name "POI CI/CD"
-                  git commit -m "update poi/open-vmdk to ${GITHUB_SHA::7} for testing branch ${{ github.ref_name }}"
+
+                  # Only commit if there are changes
+                  if git diff --cached --quiet; then
+                      echo "No changes to commit, skipping commit step"
+                  else
+                      git commit -m "update poi/open-vmdk  to ${GITHUB_SHA::7} for testing branch ${{ github.ref_name }}"
+                  fi
+
                   git push origin ${BRANCH_NAME}
 
             - name: Wait for and monitor cayman-poi workflow
