@@ -1,14 +1,14 @@
 /* *******************************************************************************
  * Copyright (c) 2014-2023 VMware, Inc.  All Rights Reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the “License”); you may not
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License.  You may obtain a copy of
  * the License at:
  *
  *            http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software distributed
- * under the License is distributed on an “AS IS” BASIS, without warranties or
+ * under the License is distributed on an "AS IS" BASIS, without warranties or
  * conditions of any kind, EITHER EXPRESS OR IMPLIED.  See the License for the
  * specific language governing permissions and limitations under the License.
  * *********************************************************************************/
@@ -16,6 +16,7 @@
 #define _GNU_SOURCE
 
 #include "diskinfo.h"
+#include "vmware_vmdk.h"
 
 #include <sys/sysinfo.h>
 #include <sys/time.h>
@@ -29,6 +30,14 @@
 /* toolsVersion in metadata -
    default is 2^31-1 (unknown) */
 char *toolsVersion = "2147483647";
+
+// Forward declaration for sparse disk structure
+typedef struct {
+    DiskInfo hdr;
+    SparseExtentHeader diskHdr;
+    void *gtInfo;  // We don't need the full structure, just the header
+    int fd;
+} SparseDiskInfo;
 
 static int
 copyData(DiskInfo *dst,
@@ -99,10 +108,11 @@ static int
 printUsage(char *cmd, int compressionLevel, int numThreads)
 {
     printf("Usage:\n");
-    printf("%s -i src.vmdk: displays information for specified virtual disk\n", cmd);
+    printf("%s -i [--detailed] src.vmdk: displays information for specified virtual disk\n", cmd);
     printf("%s [-c compressionlevel] [-n threads] [-t toolsVersion] src.vmdk dst.vmdk: converts source disk to destination disk with given tools version\n\n", cmd);
     printf("-c <level> sets the compression level. Valid values are 1 (fastest) to 9 (best). Only when writing to VMDK. Current is %d.\n", compressionLevel);
     printf("-n <threads> sets the number of threads used for compression level. Only when writing to VMDK. Current is (%d).\n", numThreads);
+    printf("--detailed shows detailed sparse extent header information (only with -i)\n");
 
     return 1;
 }
@@ -137,10 +147,17 @@ main(int argc,
     const char *src;
     int opt;
     bool doInfo = false;
+    bool doDetailed = false;
     bool doConvert = false;
     int compressionLevel = Z_BEST_COMPRESSION;
     int numThreads = get_nprocs();
     const char *env;
+
+    static struct option long_options[] = {
+        {"detailed", no_argument, 0, 'd'},
+        {"help", no_argument, 0, 'h'},
+        {0, 0, 0, 0}
+    };
 
     gettimeofday(&tv, NULL);
     srand48(tv.tv_sec ^ tv.tv_usec);
@@ -161,7 +178,7 @@ main(int argc,
         }
     }
 
-    while ((opt = getopt(argc, argv, "c:hin:t:")) != -1) {
+    while ((opt = getopt_long(argc, argv, "c:hin:t:", long_options, NULL)) != -1) {
         switch (opt) {
         case 'c':
             if (!isNumber(optarg)){
@@ -172,6 +189,9 @@ main(int argc,
             break;
         case 'i':
             doInfo = true;
+            break;
+        case 'd':
+            doDetailed = true;
             break;
         case 'n':
             if (!isNumber(optarg)) {
@@ -210,17 +230,26 @@ main(int argc,
         exit(1);
     }
 
+    if (doDetailed && !doInfo) {
+        fprintf(stderr, "--detailed can only be used with -i option\n");
+        exit(1);
+    }
+
     if (optind >= argc) {
         src = "src.vmdk";
     } else {
         src = argv[optind++];
     }
+    bool isSparse = false;
     di = Sparse_Open(src);
-    if (di == NULL) {
+    if (di != NULL) {
+        isSparse = true;
+    } else {
         di = Flat_Open(src);
     }
     if (di == NULL) {
         fprintf(stderr, "Cannot open source disk %s: %s\n", src, strerror(errno));
+        exit(1);
     } else {
         if (doInfo) {
             off_t capacity = di->vmt->getCapacity(di);
@@ -230,8 +259,42 @@ main(int argc,
             while (di->vmt->nextData(di, &pos, &end) == 0) {
                 usedSpace += end - pos;
             }
-            printf("{ \"capacity\": %llu, \"used\": %llu }\n",
+            printf("{ \"capacity\": %llu, \"used\": %llu",
                     (unsigned long long)capacity, (unsigned long long)usedSpace);
+
+            if (doDetailed) {
+                if (isSparse) {
+                    // Cast to SparseDiskInfo to access the header
+                    SparseDiskInfo *sdi = (SparseDiskInfo *)di;
+                    printf(", \"sparseHeader\": {");
+                    printf("\"version\": %u, ", sdi->diskHdr.version);
+                    printf("\"flags\": %u, ", sdi->diskHdr.flags);
+                    printf("\"flagsDecoded\": {");
+                    printf("\"validNewlineDetector\": %s, ", (sdi->diskHdr.flags & SPARSEFLAG_VALID_NEWLINE_DETECTOR) ? "true" : "false");
+                    printf("\"useRedundant\": %s, ", (sdi->diskHdr.flags & SPARSEFLAG_USE_REDUNDANT) ? "true" : "false");
+                    printf("\"compressed\": %s, ", (sdi->diskHdr.flags & SPARSEFLAG_COMPRESSED) ? "true" : "false");
+                    printf("\"embeddedLBA\": %s", (sdi->diskHdr.flags & SPARSEFLAG_EMBEDDED_LBA) ? "true" : "false");
+                    printf("}, ");
+                    printf("\"numGTEsPerGT\": %u, ", sdi->diskHdr.numGTEsPerGT);
+                    printf("\"compressAlgorithm\": %u, ", sdi->diskHdr.compressAlgorithm);
+                    printf("\"compressAlgorithmName\": \"%s\", ",
+                           sdi->diskHdr.compressAlgorithm == SPARSE_COMPRESSALGORITHM_NONE ? "none" :
+                           sdi->diskHdr.compressAlgorithm == SPARSE_COMPRESSALGORITHM_DEFLATE ? "deflate" : "unknown");
+                    printf("\"uncleanShutdown\": %u, ", sdi->diskHdr.uncleanShutdown);
+                    printf("\"grainSize\": %llu, ", (unsigned long long)sdi->diskHdr.grainSize);
+                    printf("\"grainSizeBytes\": %llu, ", (unsigned long long)(sdi->diskHdr.grainSize * 512));
+                    printf("\"descriptorOffset\": %llu, ", (unsigned long long)sdi->diskHdr.descriptorOffset);
+                    printf("\"descriptorSize\": %llu, ", (unsigned long long)sdi->diskHdr.descriptorSize);
+                    printf("\"rgdOffset\": %llu, ", (unsigned long long)sdi->diskHdr.rgdOffset);
+                    printf("\"gdOffset\": %llu, ", (unsigned long long)sdi->diskHdr.gdOffset);
+                    printf("\"overHead\": %llu", (unsigned long long)sdi->diskHdr.overHead);
+                    printf("}");
+                } else {
+                    printf(", \"error\": \"detailed information only available for sparse VMDK files\"");
+                }
+            }
+
+            printf(" }\n");
         } else {
             const char *filename;
             DiskInfo *tgt;
@@ -251,12 +314,15 @@ main(int argc,
 
             if (tgt == NULL) {
                 fprintf(stderr, "Cannot open target disk %s: %s\n", filename, strerror(errno));
+                di->vmt->close(di);
+                exit(1);
             } else {
                 printf("Starting to convert %s to %s using compression level %d and %d threads\n", src, filename, compressionLevel, numThreads);
                 if (copyDisk(di, tgt, numThreads)) {
                     printf("Success\n");
                 } else {
                     fprintf(stderr, "Failure!\n");
+                    exit(1);
                 }
             }
         }
