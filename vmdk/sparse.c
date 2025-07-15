@@ -1,14 +1,14 @@
 /* ********************************************************************************
  * Copyright (c) 2014-2023 VMware, Inc.  All Rights Reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the “License”); you may not
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License.  You may obtain a copy of
  * the License at:
  *
  *            http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software distributed
- * under the License is distributed on an “AS IS” BASIS, without warranties or
+ * under the License is distributed on an "AS IS" BASIS, without warranties or
  * conditions of any kind, EITHER EXPRESS OR IMPLIED.  See the License for the
  * specific language governing permissions and limitations under the License.
  * *********************************************************************************/
@@ -348,6 +348,14 @@ fillGrain(StreamOptimizedDiskInfo *sodi, GrainInfo *grain)
 {
     size_t lenBytes;
 
+    // Bounds check before array access
+    if (grain->bufferNr >= sodi->writer.gtInfo.GTEs) {
+        fprintf(stderr, "Grain number %llu exceeds maximum grain table entries %llu\n",
+                (unsigned long long)grain->bufferNr,
+                (unsigned long long)sodi->writer.gtInfo.GTEs);
+        return -1;
+    }
+
     if (grain->bufferNr < sodi->writer.gtInfo.lastGrainNr) {
         lenBytes = sodi->diskHdr.grainSize * VMDK_SECTOR_SIZE;
     } else if (grain->bufferNr == sodi->writer.gtInfo.lastGrainNr) {
@@ -401,6 +409,14 @@ writeGrain(StreamOptimizedDiskInfo *sodi, GrainInfo *grain, uint32_t sp)
     uint32_t rem;
     SparseGrainLBAHeaderOnDisk *grainHdr = grain->zlibBuffer.grainHdr;
 
+    // Bounds check before array access
+    if (grain->bufferNr >= sodi->writer.gtInfo.GTEs) {
+        fprintf(stderr, "Grain number %llu exceeds maximum grain table entries %llu\n",
+                (unsigned long long)grain->bufferNr,
+                (unsigned long long)sodi->writer.gtInfo.GTEs);
+        return -1;
+    }
+
     sodi->writer.gtInfo.gt[grain->bufferNr] = __cpu_to_le32(sp);
 
     dataLen = grain->zstream.next_out - grain->zlibBuffer.data;
@@ -432,6 +448,15 @@ flushGrain(StreamOptimizedDiskInfo *sodi)
     if (grain->bufferValidEnd == 0) {
         return 0;
     }
+
+    // Bounds check before array access
+    if (grain->bufferNr >= sodi->writer.gtInfo.GTEs) {
+        fprintf(stderr, "Grain number %llu exceeds maximum grain table entries %llu\n",
+                (unsigned long long)grain->bufferNr,
+                (unsigned long long)sodi->writer.gtInfo.GTEs);
+        return -1;
+    }
+
     ret = fillGrain(sodi, grain);
     if (ret) {
         return ret;
@@ -584,6 +609,7 @@ typedef enum {
 typedef struct {
     pthread_mutex_t readPosMutex;
     pthread_mutex_t writeSPMutex;
+    pthread_mutex_t stateMutex;
 
     StreamOptimizedDiskInfo *sodi;
     DiskInfo *src;
@@ -600,46 +626,60 @@ static void
     StreamOptimizedDiskInfo *sodi = gtCtx->sodi;
     SparseExtentHeader *hdr = &sodi->diskHdr;
     off_t capacity = gtCtx->src->vmt->getCapacity(gtCtx->src);
-    size_t length = capacity;
 
-    initGrain(sodi, &grain);
+    if (initGrain(sodi, &grain) == false) {
+        goto fail;
+    }
 
-    while (length > 0) {
+    while (true) {
         off_t readPos;
         size_t readLen;
+        off_t remaining;
 
         pthread_mutex_lock(&gtCtx->readPosMutex);
         readPos = gtCtx->readPos;
-        uint64_t grainNr = readPos / (hdr->grainSize * VMDK_SECTOR_SIZE);
 
-        resetGrain(&grain, grainNr);
+        // Check if another thread has failed - exit early to avoid wasted work
+        pthread_mutex_lock(&gtCtx->stateMutex);
+        if (gtCtx->state == GT_STATE_FAILED) {
+            pthread_mutex_unlock(&gtCtx->stateMutex);
+            pthread_mutex_unlock(&gtCtx->readPosMutex);
+            break;
+        }
+        pthread_mutex_unlock(&gtCtx->stateMutex);
 
-        length = capacity - readPos;
-        if (length <= 0) {
+        // Check if all work is done globally
+        if (readPos >= capacity) {
+            pthread_mutex_lock(&gtCtx->stateMutex);
             gtCtx->state = GT_STATE_DONE;
+            pthread_mutex_unlock(&gtCtx->stateMutex);
             pthread_mutex_unlock(&gtCtx->readPosMutex);
             break;
         }
 
+        // Calculate how much this thread should read
+        remaining = capacity - readPos;
         readLen = hdr->grainSize * VMDK_SECTOR_SIZE;
-        if (length < readLen) {
-            readLen = length;
-            length = 0;
-        } else {
-            length -= readLen;
+        if (remaining < (off_t)readLen) {
+            readLen = (size_t)remaining;
         }
 
-        /* forward readPos before reading and unlock,
+        uint64_t grainNr = readPos / (hdr->grainSize * VMDK_SECTOR_SIZE);
+        resetGrain(&grain, grainNr);
+
+        /* Advance global position before reading and unlock,
            so other threads get updated pos in the mean time */
         gtCtx->readPos += readLen;
 
         pthread_mutex_unlock(&gtCtx->readPosMutex);
 
+        // Read data from source
         if (gtCtx->src->vmt->pread(gtCtx->src, grain.buffer, readLen, readPos) != (ssize_t)readLen) {
             goto fail;
         }
         grain.bufferValidEnd = readLen;
 
+        // Process non-zero data
         if (!isZeroed(grain.buffer, readLen)) {
             uint32_t sp;
             if (deflateGrain(&grain) < 0) {
@@ -662,11 +702,14 @@ static void
             }
         }
     }
-    if (length == 0)
-        gtCtx->state = GT_STATE_DONE;
+
+    freeGrain(&grain);
+    return arg;
+
 fail:
-    if (length > 0)
-        gtCtx->state = GT_STATE_FAILED;
+    pthread_mutex_lock(&gtCtx->stateMutex);
+    gtCtx->state = GT_STATE_FAILED;
+    pthread_mutex_unlock(&gtCtx->stateMutex);
     freeGrain(&grain);
     return arg;
 }
@@ -679,24 +722,78 @@ StreamOptimizedCopyDisk(DiskInfo *src,
     StreamOptimizedDiskInfo *sodi = getSODI(self);
     GrainThreadContext gtCtx = {0};
     pthread_t threads[numThreads];
-    int i;
+    int i, ret;
+    int threadsCreated = 0;
+    ssize_t result = -1;
+    bool readPosMutexInit = false;
+    bool writeSPMutexInit = false;
+    bool stateMutexInit = false;
 
-    pthread_mutex_init(&gtCtx.readPosMutex, NULL);
-    pthread_mutex_init(&gtCtx.writeSPMutex, NULL);
+    // Initialize mutexes with error checking
+    if ((ret = pthread_mutex_init(&gtCtx.readPosMutex, NULL)) != 0) {
+        fprintf(stderr, "Failed to initialize readPosMutex: %s\n", strerror(ret));
+        goto cleanup;
+    }
+    readPosMutexInit = true;
+
+    if ((ret = pthread_mutex_init(&gtCtx.writeSPMutex, NULL)) != 0) {
+        fprintf(stderr, "Failed to initialize writeSPMutex: %s\n", strerror(ret));
+        goto cleanup;
+    }
+    writeSPMutexInit = true;
+
+    if ((ret = pthread_mutex_init(&gtCtx.stateMutex, NULL)) != 0) {
+        fprintf(stderr, "Failed to initialize stateMutex: %s\n", strerror(ret));
+        goto cleanup;
+    }
+    stateMutexInit = true;
+
     gtCtx.sodi = sodi;
     gtCtx.src = src;
     gtCtx.readPos = 0;
     gtCtx.state = GT_STATE_RUNNING;
 
+    // Create threads with error checking
     for (i = 0; i < numThreads; i++) {
-        pthread_create(&threads[i], NULL, deflateGrainThread, (void *)&gtCtx);
+        ret = pthread_create(&threads[i], NULL, deflateGrainThread, (void *)&gtCtx);
+        if (ret != 0) {
+            fprintf(stderr, "Failed to create thread %d: %s\n", i, strerror(ret));
+            // Set state to failed to signal existing threads to exit
+            pthread_mutex_lock(&gtCtx.stateMutex);
+            gtCtx.state = GT_STATE_FAILED;
+            pthread_mutex_unlock(&gtCtx.stateMutex);
+            break;
+        }
+        threadsCreated++;
     }
 
-    for (i = 0; i < numThreads; i++) {
-        pthread_join(threads[i], NULL);
+    // Wait for all created threads to finish
+    for (i = 0; i < threadsCreated; i++) {
+        ret = pthread_join(threads[i], NULL);
+        if (ret != 0) {
+            fprintf(stderr, "Failed to join thread %d: %s\n", i, strerror(ret));
+            // Continue trying to join remaining threads
+        }
     }
 
-    return gtCtx.state == GT_STATE_DONE ? gtCtx.readPos : -1;
+    // Determine result
+    if (threadsCreated == numThreads && gtCtx.state == GT_STATE_DONE) {
+        result = gtCtx.readPos;
+    }
+
+cleanup:
+    // Destroy mutexes in reverse order of initialization
+    if (stateMutexInit) {
+        pthread_mutex_destroy(&gtCtx.stateMutex);
+    }
+    if (writeSPMutexInit) {
+        pthread_mutex_destroy(&gtCtx.writeSPMutex);
+    }
+    if (readPosMutexInit) {
+        pthread_mutex_destroy(&gtCtx.readPosMutex);
+    }
+
+    return result;
 }
 
 static bool
