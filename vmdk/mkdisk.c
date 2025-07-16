@@ -221,7 +221,7 @@ main(int argc,
     }
 
     if (compressionLevel <= 0 || compressionLevel > 9) {
-        fprintf(stderr, "compression level must be > 0 and <= 9: %d\n", compressionLevel);
+        fprintf(stderr, "compression level must be >= 0 and <= 9: %d\n", compressionLevel);
         exit(1);
     }
 
@@ -288,6 +288,9 @@ main(int argc,
                     printf("\"rgdOffset\": %llu, ", (unsigned long long)sdi->diskHdr.rgdOffset);
                     printf("\"gdOffset\": %llu, ", (unsigned long long)sdi->diskHdr.gdOffset);
                     printf("\"overHead\": %llu", (unsigned long long)sdi->diskHdr.overHead);
+                    if (di->vmt->checkGrainOrder) {
+                        printf(", \"grainsOrdered\": %s", di->vmt->checkGrainOrder(di) ? "true" : "false");
+                    }
                     printf("}");
                 } else {
                     printf(", \"error\": \"detailed information only available for sparse VMDK files\"");

@@ -896,10 +896,14 @@ failAll:
 }
 
 static DiskInfoVMT streamOptimizedVMT = {
+    .getCapacity = NULL,
+    .pread = NULL,
     .pwrite = StreamOptimizedPwrite,
+    .nextData = NULL,
     .close = StreamOptimizedClose,
     .abort = StreamOptimizedAbort,
-    .copyDisk = StreamOptimizedCopyDisk
+    .copyDisk = StreamOptimizedCopyDisk,
+    .checkGrainOrder = NULL  /* Stream optimized format doesn't support grain order checking */
 };
 
 DiskInfo *
@@ -1172,13 +1176,59 @@ SparseClose(DiskInfo *self)
     return close(fd);
 }
 
+static bool
+areGrainsOrdered(const SparseDiskInfo *sdi)
+{
+    uint32_t i;
+    uint32_t lastValidSector = 0;
+    bool foundValid = false;
+
+    if (!sdi || !sdi->gtInfo.gt) {
+        return false;
+    }
+
+    /* Iterate through the grain table */
+    for (i = 0; i < sdi->gtInfo.GTEs; i++) {
+        uint32_t sector = __le32_to_cpu(sdi->gtInfo.gt[i]);
+
+        /* Skip empty grains (marked as 0) and zero grains (marked as 1) */
+        if (sector <= 1) {
+            continue;
+        }
+
+        if (!foundValid) {
+            lastValidSector = sector;
+            foundValid = true;
+            continue;
+        }
+
+        /* Check if this grain's sector is less than the previous valid one */
+        if (sector < lastValidSector) {
+            return false;
+        }
+
+        lastValidSector = sector;
+    }
+
+    return true;
+}
+
+static bool
+SparseCheckGrainOrder(DiskInfo *self)
+{
+    SparseDiskInfo *sdi = getSDI(self);
+    return areGrainsOrdered(sdi);
+}
 
 static DiskInfoVMT sparseVMT = {
     .getCapacity = SparseGetCapacity,
-    .nextData = SparseNextData,
     .pread = SparsePread,
+    .pwrite = NULL,
+    .nextData = SparseNextData,
     .close = SparseClose,
     .abort = SparseClose,
+    .copyDisk = NULL,
+    .checkGrainOrder = SparseCheckGrainOrder
 };
 
 DiskInfo *

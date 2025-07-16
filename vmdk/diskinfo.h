@@ -30,6 +30,7 @@ typedef struct {
     int (*close)(DiskInfo *self);
     int (*abort)(DiskInfo *self);
     ssize_t (*copyDisk)(DiskInfo *self, DiskInfo *src, int numThreads);
+    bool (*checkGrainOrder)(DiskInfo *self);  /* Returns true if grains are ordered in the grain table */
 } DiskInfoVMT;
 
 struct DiskInfo {
