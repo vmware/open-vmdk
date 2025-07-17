@@ -42,6 +42,6 @@ extern char *toolsVersion; /* toolsVersion in metadata */
 DiskInfo *Flat_Open(const char *fileName);
 DiskInfo *Flat_Create(const char *fileName, off_t capacity);
 DiskInfo *Sparse_Open(const char *fileName);
-DiskInfo *StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLevel);
+DiskInfo *StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLevel, bool doReorder);
 
 #endif /* _DISKINFO_H_ */

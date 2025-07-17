@@ -27,9 +27,82 @@
 
 #include <zlib.h>
 
+/* Uncomment to enable debug output */
+/* #define DEBUG */
+
+/* Forward declarations of structs */
+typedef union {
+    SparseGrainLBAHeaderOnDisk *grainHdr;
+    SparseSpecialLBAHeaderOnDisk *specialHdr;
+    uint8_t *data;
+} ZLibBuffer;
+
+typedef struct {
+    uint64_t GTEs;
+    uint32_t GTs;
+    uint32_t GDsectors;
+    uint32_t GTsectors;
+    uint64_t lastGrainNr;
+    uint32_t lastGrainSize;
+    __le32 *gd;
+    __le32 *gt;
+} SparseGTInfo;
+
+typedef struct GrainInfo {
+    ZLibBuffer zlibBuffer;
+    size_t zlibBufferSize;
+    z_stream zstream;
+
+    uint8_t *buffer;
+    uint64_t bufferNr;
+    uint32_t bufferValidStart;
+    uint32_t bufferValidEnd;
+} GrainInfo;
+
+typedef struct SparseVmdkWriter {
+    SparseGTInfo gtInfo;
+    uint32_t curSP;
+    GrainInfo currentGrain;
+    int fd;
+    char *fileName;
+    int compressionLevel;
+    bool doReorder;
+} SparseVmdkWriter;
+
+typedef struct StreamOptimizedDiskInfo {
+    DiskInfo hdr;
+    SparseVmdkWriter writer;
+    SparseExtentHeader diskHdr;
+} StreamOptimizedDiskInfo;
+
+typedef struct SparseDiskInfo {
+    DiskInfo hdr;
+    SparseExtentHeader diskHdr;
+    SparseGTInfo gtInfo;
+    int fd;
+} SparseDiskInfo;
+
+/* Helper functions */
+static StreamOptimizedDiskInfo *
+getSODI(DiskInfo *self)
+{
+    return (StreamOptimizedDiskInfo *)self;
+}
+
 #define CEILING(x, y) (((x) + (y) - 1) / (y))
 
 #define VMDK_SECTOR_SIZE    512ULL
+
+/* Forward declarations */
+static bool areStreamOptimizedGrainsOrdered(const StreamOptimizedDiskInfo *sodi);
+static bool reorderGrains(StreamOptimizedDiskInfo *sodi);
+static bool areSparseGrainsOrdered(const SparseDiskInfo *sdi);
+static SparseDiskInfo *getSDI(DiskInfo *self);
+static int StreamOptimizedClose(DiskInfo *self);
+static int StreamOptimizedFinalize(StreamOptimizedDiskInfo *sodi);
+static int StreamOptimizedAbort(DiskInfo *self);
+static bool writeEOS(SparseVmdkWriter *writer);
+static bool writeSpecial(SparseVmdkWriter *writer, uint32_t marker, SectorType length);
 
 static uint16_t
 getUnalignedLE16(const __le16 *src)
@@ -185,55 +258,6 @@ makeDiskDescriptorFile(const char *fileName,
     return ret;
 }
 
-typedef union {
-    SparseGrainLBAHeaderOnDisk *grainHdr;
-    SparseSpecialLBAHeaderOnDisk *specialHdr;
-    uint8_t *data;
-} ZLibBuffer;
-
-typedef struct {
-    uint64_t GTEs;
-    uint32_t GTs;
-    uint32_t GDsectors;
-    uint32_t GTsectors;
-    uint64_t lastGrainNr;
-    uint32_t lastGrainSize;
-    __le32 *gd;
-    __le32 *gt;
-} SparseGTInfo;
-
-typedef struct GrainInfo {
-    ZLibBuffer zlibBuffer;
-    size_t zlibBufferSize;
-    z_stream zstream;
-
-    uint8_t *buffer;
-    uint64_t bufferNr;
-    uint32_t bufferValidStart;
-    uint32_t bufferValidEnd;
-} GrainInfo;
-
-typedef struct {
-    SparseGTInfo gtInfo;
-    uint32_t curSP;
-    GrainInfo currentGrain;
-    int fd;
-    char *fileName;
-    int compressionLevel;
-} SparseVmdkWriter;
-
-typedef struct {
-    DiskInfo hdr;
-    SparseVmdkWriter writer;
-    SparseExtentHeader diskHdr;
-} StreamOptimizedDiskInfo;
-
-static StreamOptimizedDiskInfo *
-getSODI(DiskInfo *self)
-{
-    return (StreamOptimizedDiskInfo *)self;
-}
-
 static bool
 isPow2(uint64_t val)
 {
@@ -296,14 +320,17 @@ safePwrite(int fd,
            size_t len,
            off_t pos)
 {
+#ifdef DEBUG
+    printf("DEBUG: Writing to fd %d at pos %lld, len %zu\n", fd, (long long)pos, len);
+#endif
     ssize_t written = pwrite(fd, buf, len, pos);
 
     if (written == -1) {
-        fprintf(stderr, "Write failed: %s\n", strerror(errno));
+        fprintf(stderr, "Write failed: %s (fd=%d)\n", strerror(errno), fd);
         return false;
     }
     if ((size_t)written != len) {
-        fprintf(stderr, "Short write.  Disk full?\n");
+        fprintf(stderr, "Short write. Disk full? (fd=%d)\n", fd);
         return false;
     }
     return true;
@@ -315,14 +342,17 @@ safePread(int fd,
           size_t len,
           off_t pos)
 {
+#ifdef DEBUG
+    printf("DEBUG: Reading from fd %d at pos %lld, len %zu\n", fd, (long long)pos, len);
+#endif
     ssize_t rd = pread(fd, buf, len, pos);
 
     if (rd == -1) {
-        fprintf(stderr, "Read failed: %s\n", strerror(errno));
+        fprintf(stderr, "Read failed: %s (fd=%d)\n", strerror(errno), fd);
         return false;
     }
     if ((size_t)rd != len) {
-        fprintf(stderr, "Short read, %zu instead of %zu\n", rd, len);
+        fprintf(stderr, "Short read, %zu instead of %zu (fd=%d)\n", rd, len, fd);
         return false;
     }
     return true;
@@ -714,6 +744,307 @@ fail:
     return arg;
 }
 
+/* Add helper functions before reorderGrains */
+static bool
+writeGrainTables(int fd, const SparseExtentHeader *hdr, const SparseGTInfo *gtInfo)
+{
+    return safePwrite(fd, gtInfo->gd,
+                     (gtInfo->GDsectors + gtInfo->GTsectors * gtInfo->GTs) * VMDK_SECTOR_SIZE,
+                     hdr->gdOffset * VMDK_SECTOR_SIZE);
+}
+
+static bool
+writeDescriptor(int fd, const SparseExtentHeader *hdr)
+{
+    uint32_t cid;
+    char *descFile;
+    bool success = false;
+
+    do {
+        cid = mrand48();
+    } while (cid == 0xFFFFFFFFU || cid == 0xFFFFFFFEU);
+    
+    descFile = makeDiskDescriptorFile("disk", hdr->capacity, cid);
+    if (!descFile) {
+        fprintf(stderr, "Failed to create descriptor file\n");
+        return false;
+    }
+
+    success = (pwrite(fd, descFile, strlen(descFile), hdr->descriptorOffset * VMDK_SECTOR_SIZE) == (ssize_t)strlen(descFile));
+    free(descFile);
+    return success;
+}
+
+static bool
+writeHeaders(int fd, const SparseExtentHeader *hdr)
+{
+    SparseExtentHeaderOnDisk onDisk;
+
+    /* Write header with unclean flag */
+    setSparseExtentHeader(&onDisk, hdr, true);
+    if (pwrite(fd, &onDisk, sizeof onDisk, 0) != sizeof onDisk) {
+        fprintf(stderr, "Failed to write temporary header\n");
+        return false;
+    }
+    if (fsync(fd) != 0) {
+        fprintf(stderr, "Failed to sync temporary file\n");
+        return false;
+    }
+
+    /* Write final header */
+    setSparseExtentHeader(&onDisk, hdr, false);
+    if (pwrite(fd, &onDisk, sizeof onDisk, 0) != sizeof onDisk) {
+        fprintf(stderr, "Failed to write final header\n");
+        return false;
+    }
+    if (fsync(fd) != 0) {
+        fprintf(stderr, "Failed to sync final header\n");
+        return false;
+    }
+
+    return true;
+}
+
+static bool
+rewriteGrains(StreamOptimizedDiskInfo *sodi,
+              SparseGTInfo *srcGT, SparseGTInfo *dstGT,
+              int srcFd, int dstFd)
+{
+    uint8_t *readBuf = NULL;
+    size_t readBufSize;
+    uint64_t grainNr;
+    uint32_t nextSector;
+    bool success = false;
+
+    /* Allocate read buffer - large enough for a compressed grain plus header */
+    readBufSize = (sodi->diskHdr.grainSize + 1) * VMDK_SECTOR_SIZE;
+    readBuf = malloc(readBufSize);
+    if (!readBuf) {
+        fprintf(stderr, "Failed to allocate read buffer\n");
+        goto cleanup;
+    }
+
+    /* Set initial file position */
+    nextSector = sodi->diskHdr.overHead;
+
+    /* Process grains in order */
+    for (grainNr = 0; grainNr < sodi->writer.gtInfo.GTEs; grainNr++) {
+        uint32_t oldSector = __le32_to_cpu(srcGT->gt[grainNr]);
+        
+        /* Skip empty (0) and zero (1) grains */
+        if (oldSector <= 1) {
+            dstGT->gt[grainNr] = __cpu_to_le32(oldSector);
+            continue;
+        }
+
+#ifdef DEBUG
+        printf("DEBUG: Processing grain %llu: old sector=%u, new sector=%u (sequential)\n", 
+               (unsigned long long)grainNr, oldSector, nextSector);
+#endif
+
+        /* Read grain header first to get compressed size */
+        if (!safePread(srcFd, readBuf, VMDK_SECTOR_SIZE, oldSector * VMDK_SECTOR_SIZE)) {
+            fprintf(stderr, "Failed to read grain header for grain %llu\n", (unsigned long long)grainNr);
+            goto cleanup;
+        }
+
+        uint32_t cmpSize;
+        uint32_t hdrlen;
+        
+        /* Parse header based on format */
+        if (sodi->diskHdr.flags & SPARSEFLAG_EMBEDDED_LBA) {
+            SparseGrainLBAHeaderOnDisk *hdr = (SparseGrainLBAHeaderOnDisk *)readBuf;
+            cmpSize = __le32_to_cpu(hdr->cmpSize);
+            hdrlen = 12;
+        } else {
+            cmpSize = __le32_to_cpu(*(__le32*)readBuf);
+            hdrlen = 4;
+        }
+
+#ifdef DEBUG
+        printf("DEBUG: Grain %llu has compressed size %u, header length %u\n", 
+               (unsigned long long)grainNr, cmpSize, hdrlen);
+#endif
+
+        /* Validate compressed size */
+        if (cmpSize > readBufSize - hdrlen) {
+            fprintf(stderr, "Compressed size too large for grain %llu\n", (unsigned long long)grainNr);
+            goto cleanup;
+        }
+
+        /* Read remaining compressed data if it spans multiple sectors */
+        size_t remainingLength = 0;
+        if (cmpSize + hdrlen > VMDK_SECTOR_SIZE) {
+            remainingLength = (cmpSize + hdrlen - VMDK_SECTOR_SIZE + VMDK_SECTOR_SIZE - 1) & ~(VMDK_SECTOR_SIZE - 1);
+            if (!safePread(srcFd, readBuf + VMDK_SECTOR_SIZE, remainingLength, (oldSector + 1) * VMDK_SECTOR_SIZE)) {
+                fprintf(stderr, "Failed to read remaining data for grain %llu\n", (unsigned long long)grainNr);
+                goto cleanup;
+            }
+        }
+
+        /* Write grain to new sequential position */
+        size_t totalSize = VMDK_SECTOR_SIZE + remainingLength;
+
+#ifdef DEBUG
+        printf("DEBUG: Writing grain %llu to temp file at sector %u (sequential), size %zu\n", 
+               (unsigned long long)grainNr, nextSector, totalSize);
+#endif
+
+        if (!safePwrite(dstFd, readBuf, totalSize, nextSector * VMDK_SECTOR_SIZE)) {
+            fprintf(stderr, "Failed to write grain %llu to temp file\n", (unsigned long long)grainNr);
+            goto cleanup;
+        }
+
+        /* Update grain table with new sequential position */
+        dstGT->gt[grainNr] = __cpu_to_le32(nextSector);
+        nextSector += totalSize / VMDK_SECTOR_SIZE;
+    }
+    sodi->writer.curSP = nextSector;
+    success = true;
+
+cleanup:
+    if (readBuf != NULL)
+        free(readBuf);
+
+    return success;
+}
+
+static bool
+reorderGrains(StreamOptimizedDiskInfo *sodi)
+{
+    char *tempFileName = NULL;
+    bool success = false;
+    char *originalFileName;
+    int tempFd = -1;
+    SparseExtentHeader tempHdr;
+    SparseGTInfo tempGTInfo = {0};
+
+#ifdef DEBUG
+    printf("DEBUG: Starting reorderGrains, original fd=%d\n", sodi->writer.fd);
+#endif
+
+    /* Save original filename since we'll need it after closing */
+    originalFileName = strdup(sodi->writer.fileName);
+    if (!originalFileName) {
+        fprintf(stderr, "Failed to duplicate filename\n");
+        goto cleanup;
+    }
+
+    /* Create temp file name */
+    if (asprintf(&tempFileName, "%s.reorder.tmp", originalFileName) == -1) {
+        fprintf(stderr, "Failed to create temporary filename\n");
+        goto cleanup;
+    }
+
+#ifdef DEBUG
+    printf("DEBUG: Creating temp file %s\n", tempFileName);
+#endif
+
+    /* Create and open temp file */
+    tempFd = open(tempFileName, O_RDWR | O_CREAT | O_TRUNC, 0666);
+    if (tempFd == -1) {
+        fprintf(stderr, "Failed to create temporary file: %s\n", strerror(errno));
+        goto cleanup;
+    }
+
+#ifdef DEBUG
+    printf("DEBUG: Created temp file, fd=%d\n", tempFd);
+#endif
+
+    /* Initialize temp header and grain tables */
+    tempHdr = sodi->diskHdr;
+    if (!getGDGT(&tempGTInfo, &tempHdr)) {
+        fprintf(stderr, "Failed to initialize grain tables\n");
+        goto cleanup;
+    }
+
+
+#ifdef DEBUG
+    printf("DEBUG: Starting grain reordering from sector %u\n", nextSector);
+
+    /* Count valid grains */
+    uint32_t validGrains = 0;
+    for (grainNr = 0; grainNr < sodi->writer.gtInfo.GTEs; grainNr++) {
+        uint32_t oldSector = __le32_to_cpu(sodi->writer.gtInfo.gt[grainNr]);
+        if (oldSector > 1) {
+            validGrains++;
+        }
+    }
+    printf("DEBUG: Found %u valid grains to reorder\n", validGrains);
+#endif
+
+    if (!rewriteGrains(sodi, &sodi->writer.gtInfo, &tempGTInfo, sodi->writer.fd, tempFd)) {
+        fprintf(stderr, "Rewriting grains failed\n");
+        goto cleanup;
+    }
+
+#ifdef DEBUG
+    printf("DEBUG: Finished processing grains, final sector=%u\n", nextSector);
+#endif
+
+
+
+#ifdef DEBUG
+    printf("DEBUG: Closing files (temp fd=%d, orig fd=%d)\n", tempFd, sodi->writer.fd);
+#endif
+
+    /* Close files */
+    if (close(tempFd) != 0) {
+        fprintf(stderr, "Failed to close temporary file\n");
+        goto cleanup;
+    }
+    tempFd = -1;
+
+    if (close(sodi->writer.fd) != 0) {
+        fprintf(stderr, "Failed to close original file\n");
+        goto cleanup;
+    }
+    sodi->writer.fd = -1;  /* Prevent double-close in cleanup */
+
+#ifdef DEBUG
+    printf("DEBUG: Renaming %s to %s\n", tempFileName, originalFileName);
+#endif
+
+    /* Replace original with temp */
+    if (rename(tempFileName, originalFileName) != 0) {
+        fprintf(stderr, "Failed to rename temporary file: %s\n", strerror(errno));
+        goto cleanup;
+    }
+
+    /* Reopen the file for final operations */
+    sodi->writer.fd = open(originalFileName, O_RDWR);
+    if (sodi->writer.fd == -1) {
+        fprintf(stderr, "Failed to reopen file after rename\n");
+        goto cleanup;
+    }
+
+    /* Update the original file's grain table with the new positions */
+    memcpy(sodi->writer.gtInfo.gt, tempGTInfo.gt, sodi->writer.gtInfo.GTEs * sizeof(uint32_t));
+
+    success = true;
+
+cleanup:
+#ifdef DEBUG
+    printf("DEBUG: Cleanup (success=%d)\n", success);
+#endif
+    free(tempFileName);
+    free(originalFileName);
+    free(tempGTInfo.gd);
+    if (!success) {
+        if (tempFd != -1) {
+            close(tempFd);
+        }
+        if (tempFileName) {
+            unlink(tempFileName);
+        }
+        if (sodi->writer.fd != -1) {
+            close(sodi->writer.fd);
+            sodi->writer.fd = -1;
+        }
+    }
+    return success;
+}
+
 static ssize_t
 StreamOptimizedCopyDisk(DiskInfo *src,
                         DiskInfo *self,
@@ -842,47 +1173,32 @@ static int
 StreamOptimizedClose(DiskInfo *self)
 {
     StreamOptimizedDiskInfo *sodi = getSODI(self);
-    uint32_t cid;
-    char *descFile;
-    SparseExtentHeaderOnDisk onDisk;
 
-    if (flushGrain(sodi)) {
+    if (flushGrain(sodi))
         goto failAll;
-    }
-    writeEOS(&sodi->writer);
-    if (!safePwrite(sodi->writer.fd, sodi->writer.gtInfo.gd,
-                   (sodi->writer.gtInfo.GDsectors + sodi->writer.gtInfo.GTsectors * sodi->writer.gtInfo.GTs) * VMDK_SECTOR_SIZE,
-                   sodi->diskHdr.gdOffset * VMDK_SECTOR_SIZE)) {
-        goto failAll;
-    }
-    do {
-        cid = mrand48();
-        /*
-         * Do not accept 0xFFFFFFFF and 0xFFFFFFFE.  They may be interpreted by
-         * some software as no parent, or disk full of zeroes.
-         */
-    } while (cid == 0xFFFFFFFFU || cid == 0xFFFFFFFEU);
-    descFile = makeDiskDescriptorFile(sodi->writer.fileName, sodi->diskHdr.capacity, cid);
-    if (pwrite(sodi->writer.fd, descFile, strlen(descFile), sodi->diskHdr.descriptorOffset * VMDK_SECTOR_SIZE) != (ssize_t)strlen(descFile)) {
-        free(descFile);
-        goto failAll;
-    }
-    free(descFile);
 
-    /*
-     * Write everything out as it should be, except that file signature is
-     * vmdk, rather than VMDK.  Then flush everything to the media, and finally
-     * rewrite header with proper VMDK signature.
-     */
-    setSparseExtentHeader(&onDisk, &sodi->diskHdr, true);
-    if (pwrite(sodi->writer.fd, &onDisk, sizeof onDisk, 0) != sizeof onDisk) {
+        // Reorder grains if needed and requested
+    if (sodi->writer.doReorder && !areStreamOptimizedGrainsOrdered(sodi)) {
+        printf("reordering grains\n");
+        if (!reorderGrains(sodi)) {
+            goto failAll;
+        }
+    }
+    
+    if (!writeEOS(&sodi->writer)) {
+        fprintf(stderr, "Failed to write EOS marker\n");
         goto failAll;
     }
-    if (fsync(sodi->writer.fd) != 0) {
+    if (!writeGrainTables(sodi->writer.fd, &sodi->diskHdr, &sodi->writer.gtInfo)) {
+        fprintf(stderr, "Failed to write grain tables\n");
         goto failAll;
     }
-    setSparseExtentHeader(&onDisk, &sodi->diskHdr, false);
-    if (pwrite(sodi->writer.fd, &onDisk, sizeof onDisk, 0) != sizeof onDisk) {
+    if (!writeDescriptor(sodi->writer.fd, &sodi->diskHdr)) {
+        fprintf(stderr, "Failed to write descriptor\n");
+        goto failAll;
+    }
+    if (!writeHeaders(sodi->writer.fd, &sodi->diskHdr)) {
+        fprintf(stderr, "Failed to write headers\n");
         goto failAll;
     }
     if (fsync(sodi->writer.fd) != 0) {
@@ -903,11 +1219,11 @@ static DiskInfoVMT streamOptimizedVMT = {
     .close = StreamOptimizedClose,
     .abort = StreamOptimizedAbort,
     .copyDisk = StreamOptimizedCopyDisk,
-    .checkGrainOrder = NULL  /* Stream optimized format doesn't support grain order checking */
+    .checkGrainOrder = NULL
 };
 
 DiskInfo *
-StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLevel)
+StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLevel, bool doReorder)
 {
     StreamOptimizedDiskInfo *sodi;
 
@@ -936,6 +1252,7 @@ StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLeve
         goto failGDGT;
     }
     sodi->writer.compressionLevel = compressionLevel;
+    sodi->writer.doReorder = doReorder;
 
     sodi->diskHdr.descriptorOffset = sodi->diskHdr.overHead;
     sodi->diskHdr.descriptorSize = 20;
@@ -963,13 +1280,6 @@ failSODI:
 fail:
     return NULL;
 }
-
-typedef struct {
-    DiskInfo hdr;
-    SparseExtentHeader diskHdr;
-    SparseGTInfo gtInfo;
-    int fd;
-} SparseDiskInfo;
 
 typedef struct {
     off_t pos;
@@ -1176,21 +1486,22 @@ SparseClose(DiskInfo *self)
     return close(fd);
 }
 
+/* Helper function to check if grains are ordered in a grain table */
 static bool
-areGrainsOrdered(const SparseDiskInfo *sdi)
+areGrainsOrdered(const SparseGTInfo *gtInfo)
 {
     uint32_t i;
     uint32_t lastValidSector = 0;
     bool foundValid = false;
 
-    if (!sdi || !sdi->gtInfo.gt) {
+    if (!gtInfo || !gtInfo->gt) {
         return false;
     }
 
     /* Iterate through the grain table */
-    for (i = 0; i < sdi->gtInfo.GTEs; i++) {
-        uint32_t sector = __le32_to_cpu(sdi->gtInfo.gt[i]);
-
+    for (i = 0; i < gtInfo->GTEs; i++) {
+        uint32_t sector = __le32_to_cpu(gtInfo->gt[i]);
+        
         /* Skip empty grains (marked as 0) and zero grains (marked as 1) */
         if (sector <= 1) {
             continue;
@@ -1214,10 +1525,28 @@ areGrainsOrdered(const SparseDiskInfo *sdi)
 }
 
 static bool
+areSparseGrainsOrdered(const SparseDiskInfo *sdi)
+{
+    if (!sdi) {
+        return false;
+    }
+    return areGrainsOrdered(&sdi->gtInfo);
+}
+
+static bool
+areStreamOptimizedGrainsOrdered(const StreamOptimizedDiskInfo *sodi)
+{
+    if (!sodi) {
+        return false;
+    }
+    return areGrainsOrdered(&sodi->writer.gtInfo);
+}
+
+static bool
 SparseCheckGrainOrder(DiskInfo *self)
 {
     SparseDiskInfo *sdi = getSDI(self);
-    return areGrainsOrdered(sdi);
+    return areSparseGrainsOrdered(sdi);
 }
 
 static DiskInfoVMT sparseVMT = {
@@ -1292,4 +1621,5 @@ failFd:
 fail:
     return NULL;
 }
+
 

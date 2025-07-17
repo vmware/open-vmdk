@@ -109,10 +109,11 @@ printUsage(char *cmd, int compressionLevel, int numThreads)
 {
     printf("Usage:\n");
     printf("%s -i [--detailed] src.vmdk: displays information for specified virtual disk\n", cmd);
-    printf("%s [-c compressionlevel] [-n threads] [-t toolsVersion] src.vmdk dst.vmdk: converts source disk to destination disk with given tools version\n\n", cmd);
+    printf("%s [-c compressionlevel] [-n threads] [-t toolsVersion] [--noreorder] src.vmdk dst.vmdk: converts source disk to destination disk with given tools version\n\n", cmd);
     printf("-c <level> sets the compression level. Valid values are 1 (fastest) to 9 (best). Only when writing to VMDK. Current is %d.\n", compressionLevel);
     printf("-n <threads> sets the number of threads used for compression level. Only when writing to VMDK. Current is (%d).\n", numThreads);
     printf("--detailed shows detailed sparse extent header information (only with -i)\n");
+    printf("--noreorder disables grain reordering after compression (default: reordering enabled)\n");
 
     return 1;
 }
@@ -149,6 +150,7 @@ main(int argc,
     bool doInfo = false;
     bool doDetailed = false;
     bool doConvert = false;
+    bool doReorder = true;  // Default to true for backward compatibility
     int compressionLevel = Z_BEST_COMPRESSION;
     int numThreads = get_nprocs();
     const char *env;
@@ -156,6 +158,7 @@ main(int argc,
     static struct option long_options[] = {
         {"detailed", no_argument, 0, 'd'},
         {"help", no_argument, 0, 'h'},
+        {"noreorder", no_argument, 0, 'r'},
         {0, 0, 0, 0}
     };
 
@@ -200,6 +203,9 @@ main(int argc,
             }
             numThreads = atoi(optarg);
             break;
+        case 'r':
+            doReorder = false;
+            break;
         case 't':
             doConvert = true;
             toolsVersion = optarg;
@@ -220,7 +226,7 @@ main(int argc,
         exit(1);
     }
 
-    if (compressionLevel <= 0 || compressionLevel > 9) {
+    if (compressionLevel < 0 || compressionLevel > 9) {
         fprintf(stderr, "compression level must be >= 0 and <= 9: %d\n", compressionLevel);
         exit(1);
     }
@@ -311,7 +317,7 @@ main(int argc,
             capacity = di->vmt->getCapacity(di);
 
             if (strcmp(&(filename[strlen(filename) - 5]), ".vmdk") == 0)
-                tgt = StreamOptimized_Create(filename, capacity, compressionLevel);
+                tgt = StreamOptimized_Create(filename, capacity, compressionLevel, doReorder);
             else
                 tgt = Flat_Create(filename, capacity);
 

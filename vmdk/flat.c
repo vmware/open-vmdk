@@ -113,7 +113,9 @@ static DiskInfoVMT flatDiskInfoVMT = {
     .pwrite = FlatPwrite,
     .nextData = FlatNextData,
     .close = FlatClose,
-    .abort = FlatClose
+    .abort = FlatClose,
+    .copyDisk = NULL,
+    .checkGrainOrder = NULL
 };
 
 DiskInfo *
