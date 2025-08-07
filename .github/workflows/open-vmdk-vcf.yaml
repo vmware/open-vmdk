@@ -171,7 +171,9 @@ jobs:
                   pytest-3 pytest/
 
     poi-harness:
-        runs-on: self-hosted
+        runs-on:
+            - self-hosted
+            - docker:root
         needs: build-container
 
         steps:
@@ -217,6 +219,47 @@ jobs:
                   done
 
                   sudo chown -R $(id -u -n):$(id -g -n) .
+
+    build-rpms:
+        runs-on:
+            - self-hosted
+            - docker:rootless
+        steps:
+            - name: checkout code
+              uses: actions/checkout@v3
+
+            - name: create tarball
+              working-directory: ${{ github.workspace }}
+              run: |
+                  VERSION=$(cat open-vmdk.spec | grep Version | awk '{print $2}')
+                  FULL_NAME=open-vmdk-${VERSION}
+                  tar zcf v${VERSION}.tar.gz --transform "s,^,${FULL_NAME}/," $(git ls-files)
+
+            - name: build RPMs
+              working-directory: ${{ github.workspace }}
+              run: |
+                  PWD=$(pwd)
+                  mkdir -p photon
+                  docker run --privileged --rm \
+                      -v${PWD}/photon:/usr/src/photon \
+                      -v${PWD}:/usr/src/photon/SOURCES \
+                      photon/installer \
+                          create-pkg \
+                          -v 5.0 open-vmdk --skip-checksum -o
+
+            - name: copy artifacts and create repo
+              run: |
+                  rm -rf photon/RPMS/repodata
+                  mkdir -p ${HOME}/artifacts/open-vmdk/${GITHUB_SHA::7}
+                  cp -r photon/RPMS/ ${HOME}/artifacts/open-vmdk/${GITHUB_SHA::7}/
+                  cp -r photon/SRPMS/ ${HOME}/artifacts/open-vmdk/${GITHUB_SHA::7}/
+                  cd ${HOME}/artifacts/open-vmdk/${GITHUB_SHA::7} && createrepo .
+
+            - name: set symlink for master
+              run: |
+                  if [[ "${{ github.ref_name }}" == "master" ]] ; then
+                      cd ${HOME}/artifacts/open-vmdk/ && rm -f master && ln -fs ${GITHUB_SHA::7} ./master
+                  fi
 
     github-public:
         runs-on: self-hosted
