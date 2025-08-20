@@ -30,6 +30,7 @@ typedef struct {
     int (*close)(DiskInfo *self);
     int (*abort)(DiskInfo *self);
     ssize_t (*copyDisk)(DiskInfo *self, DiskInfo *src, int numThreads);
+    bool (*checkGrainOrder)(DiskInfo *self);  /* Returns true if grains are ordered in the grain table */
 } DiskInfoVMT;
 
 struct DiskInfo {
@@ -41,6 +42,6 @@ extern char *toolsVersion; /* toolsVersion in metadata */
 DiskInfo *Flat_Open(const char *fileName);
 DiskInfo *Flat_Create(const char *fileName, off_t capacity);
 DiskInfo *Sparse_Open(const char *fileName);
-DiskInfo *StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLevel);
+DiskInfo *StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLevel, bool doReorder);
 
 #endif /* _DISKINFO_H_ */
