@@ -14,7 +14,7 @@ jobs:
     strategy:
       matrix:
         arch: [amd64, arm64]
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -30,7 +30,7 @@ jobs:
         # Create a Dockerfile for building and testing
         cat > Dockerfile.test << 'EOF'
         FROM --platform=$TARGETPLATFORM ubuntu:24.04
-        
+
         # Install build dependencies
         RUN apt-get update && apt-get install -y \
             build-essential \
@@ -52,33 +52,33 @@ jobs:
             python3 \
             python3-libxml2 \
             sudo
-        
+
         # Copy source code
         COPY . /src
         WORKDIR /src
-        
+
         # Build packages
         RUN debian/rules clean && \
             debian/rules build && \
             debian/rules binary
-        
+
         # Test packages
         RUN dpkg -i /src/../*.deb || apt-get install -f -y
-        
+
         # Basic functionality tests
         RUN vmdk-convert --help || vmdk-convert -h || echo "vmdk-convert help not available"
         RUN ova-compose --help || ova-compose -h || echo "ova-compose help not available"
         RUN ovfenv --help || ovfenv -h || echo "ovfenv help not available"
         RUN mkova.sh --help || mkova.sh -h || echo "mkova.sh help not available"
-        
+
         # Verify files are installed correctly
         RUN test -f /etc/open-vmdk.conf
         RUN test -d /var/lib/ovfenv
         RUN test -d /usr/share/open-vmdk
         RUN ls -la /usr/share/open-vmdk/template-*.ovf
-        
+
         EOF
-        
+
         # Build and run the test
         docker buildx build \
           --platform linux/${{ matrix.arch }} \
@@ -92,9 +92,19 @@ jobs:
         # Create container and copy packages out
         docker create --name temp-container open-vmdk-test:${{ matrix.arch }}
         mkdir -p packages
-        docker cp temp-container:/src/../ packages/ || true
+        # Copy the parent directory contents and then move .deb files
+        docker cp temp-container:/src/.. temp-extract/ || true
+        find temp-extract/ -name "*.deb" -exec cp {} packages/ \; 2>/dev/null || true
         docker rm temp-container
-        ls -la packages/ || true
+
+        # Verify packages were extracted
+        if [ ! -f packages/*.deb ]; then
+          echo "ERROR: No .deb packages found after extraction"
+          exit 1
+        fi
+
+        echo "Extracted packages:"
+        ls -la packages/
 
     - name: Upload packages
       if: matrix.arch == 'amd64'
@@ -103,3 +113,4 @@ jobs:
         name: debian-packages-${{ matrix.arch }}
         path: packages/*.deb
         retention-days: 30
+

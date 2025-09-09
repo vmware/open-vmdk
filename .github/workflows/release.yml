@@ -50,26 +50,54 @@ jobs:
       run: |
         VERSION="${{ steps.get_version.outputs.version }}"
         DATE=$(date -R)
-        
+
         # Update changelog with release version
         sed -i "1s/open-vmdk (.*)/open-vmdk ($VERSION-1)/" debian/changelog
         sed -i "4s/.*/  \* Release $VERSION/" debian/changelog
         sed -i "6s/.*/  -- Oliver Kurth <oliver.kurth@broadcom.com>  $DATE/" debian/changelog
-        
+
         echo "Updated changelog:"
         head -10 debian/changelog
 
     - name: Build release packages
       run: |
         echo "Building release packages..."
+        BUILD_SUCCESS=false
+
         # Try standard build first, fall back to manual if fakeroot fails
-        if ! dpkg-buildpackage -us -uc --build=binary 2>/dev/null; then
+        if dpkg-buildpackage -us -uc --build=binary 2>/dev/null; then
+          echo "Standard build succeeded"
+          BUILD_SUCCESS=true
+        else
           echo "Standard build failed, trying manual build..."
           debian/rules clean
-          debian/rules build
-          sudo debian/rules binary
-          sudo chown -R $(id -u):$(id -g) debian/ ../*.deb 2>/dev/null || true
+          if debian/rules build && sudo debian/rules binary; then
+            sudo chown -R $(id -u):$(id -g) debian/ ../*.deb 2>/dev/null || true
+            echo "Manual build succeeded"
+            BUILD_SUCCESS=true
+          else
+            echo "Manual build also failed"
+          fi
         fi
+
+        if [ "$BUILD_SUCCESS" != "true" ]; then
+          echo "ERROR: All build methods failed"
+          exit 1
+        fi
+
+        # Verify both expected packages were built
+        if [ ! -f ../open-vmdk_*.deb ]; then
+          echo "ERROR: open-vmdk package was not built"
+          exit 1
+        fi
+
+        if [ ! -f ../ovfenv_*.deb ]; then
+          echo "ERROR: ovfenv package was not built"
+          exit 1
+        fi
+
+        echo "Successfully built release packages:"
+        ls -la ../*.deb
 
     - name: Run quality checks
       run: |
@@ -77,10 +105,34 @@ jobs:
         lintian --no-tag-display-limit ../open-vmdk_*.deb || true
         lintian --no-tag-display-limit ../ovfenv_*.deb || true
 
-    - name: Create checksums
+    - name: Prepare release files
       run: |
-        cd ..
+        mkdir -p release-files
+
+        # Copy packages and verify they exist
+        if ! cp ../*.deb release-files/ 2>/dev/null; then
+          echo "ERROR: No .deb files found for release"
+          exit 1
+        fi
+
+        cd release-files
+
+        # Verify both expected packages exist
+        if [ ! -f open-vmdk_*.deb ]; then
+          echo "ERROR: open-vmdk package not found for release"
+          exit 1
+        fi
+
+        if [ ! -f ovfenv_*.deb ]; then
+          echo "ERROR: ovfenv package not found for release"
+          exit 1
+        fi
+
+        # Generate checksums
         sha256sum *.deb > checksums.sha256
+
+        echo "Release files:"
+        ls -la
         echo "Checksums:"
         cat checksums.sha256
 
@@ -92,8 +144,8 @@ jobs:
         draft: false
         prerelease: false
         files: |
-          ../*.deb
-          ../checksums.sha256
+          release-files/*.deb
+          release-files/checksums.sha256
         body: |
           ## Debian Packages for open-vmdk ${{ steps.get_version.outputs.version }}
           
@@ -124,3 +176,4 @@ jobs:
           ```
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
