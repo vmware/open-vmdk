@@ -1,0 +1,126 @@
+name: Create Release Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to create release for'
+        required: true
+        type: string
+
+jobs:
+  create-release-packages:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.tag || github.ref }}
+
+    - name: Set up build environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          debhelper \
+          devscripts \
+          zlib1g-dev \
+          gcc \
+          fakeroot \
+          lintian \
+          dpkg-dev
+
+    - name: Get version from tag
+      id: get_version
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          VERSION="${{ github.event.inputs.tag }}"
+        else
+          VERSION=${GITHUB_REF#refs/tags/}
+        fi
+        VERSION=${VERSION#v}  # Remove 'v' prefix if present
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Version: $VERSION"
+
+    - name: Update changelog for release
+      run: |
+        VERSION="${{ steps.get_version.outputs.version }}"
+        DATE=$(date -R)
+        
+        # Update changelog with release version
+        sed -i "1s/open-vmdk (.*)/open-vmdk ($VERSION-1)/" debian/changelog
+        sed -i "4s/.*/  \* Release $VERSION/" debian/changelog
+        sed -i "6s/.*/  -- Oliver Kurth <oliver.kurth@broadcom.com>  $DATE/" debian/changelog
+        
+        echo "Updated changelog:"
+        head -10 debian/changelog
+
+    - name: Build release packages
+      run: |
+        echo "Building release packages..."
+        # Try standard build first, fall back to manual if fakeroot fails
+        if ! dpkg-buildpackage -us -uc --build=binary 2>/dev/null; then
+          echo "Standard build failed, trying manual build..."
+          debian/rules clean
+          debian/rules build
+          sudo debian/rules binary
+          sudo chown -R $(id -u):$(id -g) debian/ ../*.deb 2>/dev/null || true
+        fi
+
+    - name: Run quality checks
+      run: |
+        echo "Running lintian checks..."
+        lintian --no-tag-display-limit ../open-vmdk_*.deb || true
+        lintian --no-tag-display-limit ../ovfenv_*.deb || true
+
+    - name: Create checksums
+      run: |
+        cd ..
+        sha256sum *.deb > checksums.sha256
+        echo "Checksums:"
+        cat checksums.sha256
+
+    - name: Create release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+        name: Release ${{ steps.get_version.outputs.version }}
+        draft: false
+        prerelease: false
+        files: |
+          ../*.deb
+          ../checksums.sha256
+        body: |
+          ## Debian Packages for open-vmdk ${{ steps.get_version.outputs.version }}
+          
+          This release contains Debian packages for open-vmdk version ${{ steps.get_version.outputs.version }}.
+          
+          ### Packages
+          
+          - **open-vmdk** - Main package with vmdk-convert, ova-compose, mkova.sh and OVF templates
+          - **ovfenv** - OVF environment tools
+          
+          ### Installation
+          
+          ```bash
+          # Download the .deb files
+          wget https://github.com/vmware/open-vmdk/releases/download/${{ github.event.inputs.tag || github.ref_name }}/open-vmdk_${{ steps.get_version.outputs.version }}-1_amd64.deb
+          wget https://github.com/vmware/open-vmdk/releases/download/${{ github.event.inputs.tag || github.ref_name }}/ovfenv_${{ steps.get_version.outputs.version }}-1_all.deb
+          
+          # Install packages
+          sudo apt-get install -y coreutils grep python3-lxml python3-yaml sed tar util-linux zlib1g
+          sudo dpkg -i open-vmdk_${{ steps.get_version.outputs.version }}-1_amd64.deb ovfenv_${{ steps.get_version.outputs.version }}-1_all.deb
+          ```
+          
+          ### Verification
+          
+          Verify checksums:
+          ```bash
+          sha256sum -c checksums.sha256
+          ```
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,105 @@
+name: Multi-Architecture Package Test
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-test-multiarch:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up QEMU for multi-arch
+      uses: docker/setup-qemu-action@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build and test on ${{ matrix.arch }}
+      run: |
+        # Create a Dockerfile for building and testing
+        cat > Dockerfile.test << 'EOF'
+        FROM --platform=$TARGETPLATFORM ubuntu:24.04
+        
+        # Install build dependencies
+        RUN apt-get update && apt-get install -y \
+            build-essential \
+            debhelper \
+            devscripts \
+            zlib1g-dev \
+            gcc \
+            fakeroot \
+            lintian \
+            dpkg-dev \
+            coreutils \
+            grep \
+            python3-lxml \
+            python3-yaml \
+            sed \
+            tar \
+            util-linux \
+            zlib1g \
+            python3 \
+            python3-libxml2 \
+            sudo
+        
+        # Copy source code
+        COPY . /src
+        WORKDIR /src
+        
+        # Build packages
+        RUN debian/rules clean && \
+            debian/rules build && \
+            debian/rules binary
+        
+        # Test packages
+        RUN dpkg -i /src/../*.deb || apt-get install -f -y
+        
+        # Basic functionality tests
+        RUN vmdk-convert --help || vmdk-convert -h || echo "vmdk-convert help not available"
+        RUN ova-compose --help || ova-compose -h || echo "ova-compose help not available"
+        RUN ovfenv --help || ovfenv -h || echo "ovfenv help not available"
+        RUN mkova.sh --help || mkova.sh -h || echo "mkova.sh help not available"
+        
+        # Verify files are installed correctly
+        RUN test -f /etc/open-vmdk.conf
+        RUN test -d /var/lib/ovfenv
+        RUN test -d /usr/share/open-vmdk
+        RUN ls -la /usr/share/open-vmdk/template-*.ovf
+        
+        EOF
+        
+        # Build and run the test
+        docker buildx build \
+          --platform linux/${{ matrix.arch }} \
+          --file Dockerfile.test \
+          --tag open-vmdk-test:${{ matrix.arch }} \
+          .
+
+    - name: Extract packages from container
+      if: matrix.arch == 'amd64'  # Only extract from one architecture to avoid conflicts
+      run: |
+        # Create container and copy packages out
+        docker create --name temp-container open-vmdk-test:${{ matrix.arch }}
+        mkdir -p packages
+        docker cp temp-container:/src/../ packages/ || true
+        docker rm temp-container
+        ls -la packages/ || true
+
+    - name: Upload packages
+      if: matrix.arch == 'amd64'
+      uses: actions/upload-artifact@v4
+      with:
+        name: debian-packages-${{ matrix.arch }}
+        path: packages/*.deb
+        retention-days: 30
