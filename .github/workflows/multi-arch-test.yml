@@ -25,6 +25,18 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
+    - name: Debug environment
+      run: |
+        echo "Architecture: ${{ matrix.arch }}"
+        echo "Docker version:"
+        docker --version
+        echo "Docker buildx version:"
+        docker buildx version
+        echo "Available platforms:"
+        docker buildx ls
+        echo "Current directory contents:"
+        ls -la
+
     - name: Build and test on ${{ matrix.arch }}
       run: |
         # Create a Dockerfile for building and testing
@@ -38,7 +50,6 @@ jobs:
             devscripts \
             zlib1g-dev \
             gcc \
-            fakeroot \
             lintian \
             dpkg-dev \
             coreutils \
@@ -57,13 +68,16 @@ jobs:
         COPY . /src
         WORKDIR /src
 
-        # Build packages
-        RUN debian/rules clean && \
-            debian/rules build && \
-            debian/rules binary
+        # Build packages (without fakeroot in container)
+        RUN debian/rules clean
+        RUN debian/rules build
+        RUN debian/rules binary
 
-        # Test packages
-        RUN dpkg -i /src/../*.deb || apt-get install -f -y
+        # Verify packages were built
+        RUN ls -la ../*.deb
+
+        # Test packages installation
+        RUN dpkg -i ../*.deb || (apt-get update && apt-get install -f -y)
 
         # Basic functionality tests
         RUN vmdk-convert --help || vmdk-convert -h || echo "vmdk-convert help not available"
@@ -79,22 +93,68 @@ jobs:
 
         EOF
 
-        # Build and run the test
-        docker buildx build \
+        # Build and run the test with error handling
+        echo "Building Docker image for ${{ matrix.arch }}..."
+        if docker buildx build \
           --platform linux/${{ matrix.arch }} \
           --file Dockerfile.test \
           --tag open-vmdk-test:${{ matrix.arch }} \
-          .
+          --progress=plain \
+          . ; then
+          echo "Docker build completed successfully for ${{ matrix.arch }}"
+
+          # Verify the image was created and tagged correctly
+          if docker image inspect open-vmdk-test:${{ matrix.arch }} >/dev/null 2>&1; then
+            echo "Docker image verified successfully"
+          else
+            echo "ERROR: Docker image was not created properly"
+            exit 1
+          fi
+        else
+          echo "ERROR: Docker build failed for ${{ matrix.arch }}"
+          echo "Build logs should be visible above"
+          exit 1
+        fi
 
     - name: Extract packages from container
       if: matrix.arch == 'amd64'  # Only extract from one architecture to avoid conflicts
       run: |
+        # Verify the Docker image exists
+        if ! docker image inspect open-vmdk-test:${{ matrix.arch }} >/dev/null 2>&1; then
+          echo "ERROR: Docker image open-vmdk-test:${{ matrix.arch }} not found"
+          exit 1
+        fi
+
         # Create container and copy packages out
-        docker create --name temp-container open-vmdk-test:${{ matrix.arch }}
-        mkdir -p packages
-        # Copy the parent directory contents and then move .deb files
-        docker cp temp-container:/src/.. temp-extract/ || true
-        find temp-extract/ -name "*.deb" -exec cp {} packages/ \; 2>/dev/null || true
+        echo "Creating container from open-vmdk-test:${{ matrix.arch }}..."
+        if ! docker create --name temp-container open-vmdk-test:${{ matrix.arch }}; then
+          echo "ERROR: Failed to create container from image"
+          exit 1
+        fi
+
+        mkdir -p packages temp-extract
+
+        # Copy the parent directory contents
+        echo "Extracting files from container..."
+        if docker cp temp-container:/src/.. temp-extract/; then
+          echo "Successfully copied files from container"
+          ls -la temp-extract/ || true
+        else
+          echo "ERROR: Failed to copy files from container"
+          docker rm temp-container
+          exit 1
+        fi
+
+        # Find and copy .deb files
+        if find temp-extract/ -name "*.deb" -exec cp {} packages/ \; 2>/dev/null; then
+          echo "Found and copied .deb files"
+        else
+          echo "ERROR: No .deb files found in container"
+          docker rm temp-container
+          exit 1
+        fi
+
+        # Clean up container
         docker rm temp-container
 
         # Verify packages were extracted
@@ -103,7 +163,7 @@ jobs:
           exit 1
         fi
 
-        echo "Extracted packages:"
+        echo "Successfully extracted packages:"
         ls -la packages/
 
     - name: Upload packages
