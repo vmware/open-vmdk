@@ -1,0 +1,113 @@
+Debian Packaging for open-vmdk
+===============================
+
+This directory contains the Debian packaging files for open-vmdk, a tool for 
+creating OVA (Open Virtual Appliance) files from raw disk images.
+
+Package Structure
+-----------------
+
+This packaging creates two binary packages:
+
+1. **open-vmdk** - The main package containing:
+   - vmdk-convert: Convert raw disk images to VMDK format
+   - ova-compose: Create OVA files from VMDK images and YAML configurations
+   - mkova.sh: Legacy tool for creating OVAs using templates
+   - OVF templates for various hardware versions
+   - Configuration file at /etc/open-vmdk.conf
+
+2. **ovfenv** - Separate package for OVF environment tools:
+   - ovfenv: Tool to get/set OVF environment variables
+   - Directory /var/lib/ovfenv for storing OVF environment data
+
+Build Dependencies
+------------------
+
+To build this package, you need:
+- debhelper (>= 10)
+- zlib1g-dev
+- gcc
+- build-essential
+
+Install with:
+    sudo apt-get install debhelper zlib1g-dev gcc build-essential
+
+Building the Package
+--------------------
+
+1. Install build dependencies (see above)
+
+2. Build the package using one of these methods:
+
+   Method A - Standard (recommended):
+    dpkg-buildpackage -us -uc --build=binary
+
+   Method B - Using provided scripts:
+    ./build-deb.sh
+
+   Method C - If fakeroot has issues (some systems):
+    ./build-deb-manual.sh
+
+   Method D - Using debuild (if available):
+    sudo apt-get install devscripts
+    debuild -us -uc -b
+
+   Method E - Manual build (if fakeroot fails):
+    debian/rules build
+    sudo debian/rules binary
+
+3. The resulting .deb files will be created in the parent directory
+
+Troubleshooting
+---------------
+
+If you encounter fakeroot errors like "fakeroot internal error #43", this is a
+known issue on some systems. Use one of the alternative build methods above,
+particularly Method C (build-deb-manual.sh) or Method E (manual build).
+
+Package Files
+-------------
+
+Key packaging files:
+- control: Package metadata and dependencies
+- rules: Build instructions (uses debhelper)
+- changelog: Version history
+- copyright: License information (Apache 2.0)
+- compat: Debhelper compatibility level (10)
+- *.install: File installation lists
+- ovfenv.postinst: Post-installation script for ovfenv package
+- watch: Upstream version monitoring
+
+Installation
+------------
+
+After building, install with:
+    sudo dpkg -i ../open-vmdk_*.deb ../ovfenv_*.deb
+
+Or install just the main package:
+    sudo dpkg -i ../open-vmdk_*.deb
+
+Dependencies will be automatically resolved if installing via apt.
+
+Runtime Dependencies
+--------------------
+
+The open-vmdk package depends on:
+- coreutils, grep, sed, tar, util-linux (standard system tools)
+- python3-lxml, python3-yaml (Python libraries)
+- zlib1g (compression library)
+
+The ovfenv package depends on:
+- open-vm-tools (VMware tools)
+- python3, python3-libxml2
+
+Notes
+-----
+
+- The packaging follows Debian Policy and uses debhelper
+- Source format is 3.0 (quilt) for patch management
+- Configuration file /etc/open-vmdk.conf is marked as conffile
+- ovfenv package handles migration of existing OVF environment files
+
+Maintainer: Oliver Kurth <oliver.kurth@broadcom.com>
+Based on RPM spec by the same maintainer.

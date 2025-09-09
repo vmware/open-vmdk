@@ -1,0 +1,13 @@
+#!/bin/sh
+
+set -e
+
+if [ "$1" = "configure" ]; then
+    if [ -f /opt/vmware/etc/vami/ovfEnv.xml ] && [ ! -f /var/lib/ovfenv/ovfEnv.xml ]; then
+        mv /opt/vmware/etc/vami/ovfEnv.xml /var/lib/ovfenv/ovfEnv.xml
+    fi
+fi
+
+#DEBHELPER#
+
+exit 0

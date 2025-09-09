@@ -1,0 +1,22 @@
+open-vmdk for Debian
+====================
+
+This package provides tools to create OVA (Open Virtual Appliance) files
+from raw disk images.
+
+The package includes:
+- vmdk-convert: Convert raw disk images to VMDK format
+- ova-compose: Create OVA files from VMDK images and configuration files
+- mkova.sh: Legacy tool for creating OVAs using templates
+
+The ovfenv package provides tools for handling OVF environment variables
+in virtual machines.
+
+Configuration:
+The main package installs a configuration file at /etc/open-vmdk.conf
+which can be modified to adjust default settings.
+
+For more information, see the upstream documentation at:
+https://github.com/vmware/open-vmdk
+
+ -- Oliver Kurth <oliver.kurth@broadcom.com>  Tue, 09 Sep 2025 12:00:00 +0000
