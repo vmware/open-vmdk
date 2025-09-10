@@ -23,3 +23,5 @@ Description: Tools to get or set OVF environment variables
  Show the value of an OVF property, whether the properties
  were presented to this VM in guestinfo or on a cdrom.
  Optionally, allows a property value to be modified.
+
+
