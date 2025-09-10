@@ -1,0 +1,103 @@
+name: Simple Multi-Architecture Test
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  test-architectures:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up QEMU for multi-arch
+      uses: docker/setup-qemu-action@v3
+
+    - name: Test build on ${{ matrix.arch }}
+      run: |
+        echo "Testing build on ${{ matrix.arch }} architecture..."
+        
+        # Create a simple test script
+        cat > test-build.sh << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        echo "Installing dependencies..."
+        apt-get update
+        apt-get install -y build-essential debhelper zlib1g-dev gcc dpkg-dev
+        
+        echo "Building packages..."
+        debian/rules clean
+        debian/rules build
+        debian/rules binary
+        
+        echo "Verifying packages..."
+        ls -la ../*.deb
+        
+        # Check that both packages exist
+        if [ ! -f ../open-vmdk_*.deb ]; then
+          echo "ERROR: open-vmdk package not found"
+          exit 1
+        fi
+        
+        if [ ! -f ../ovfenv_*.deb ]; then
+          echo "ERROR: ovfenv package not found"
+          exit 1
+        fi
+        
+        echo "Build successful on $(uname -m)"
+        EOF
+        
+        chmod +x test-build.sh
+        
+        # Run the test in a container for the target architecture
+        docker run --rm \
+          --platform linux/${{ matrix.arch }} \
+          -v $(pwd):/workspace \
+          -w /workspace \
+          ubuntu:24.04 \
+          ./test-build.sh
+
+    - name: Save packages (amd64 only)
+      if: matrix.arch == 'amd64'
+      run: |
+        # Run the build again to get packages for upload
+        docker run --rm \
+          --platform linux/${{ matrix.arch }} \
+          -v $(pwd):/workspace \
+          -w /workspace \
+          ubuntu:24.04 \
+          bash -c "
+            apt-get update && 
+            apt-get install -y build-essential debhelper zlib1g-dev gcc dpkg-dev &&
+            debian/rules clean &&
+            debian/rules build &&
+            debian/rules binary
+          "
+        
+        # Copy packages to a local directory
+        mkdir -p packages
+        cp ../*.deb packages/ 2>/dev/null || echo "No packages to copy"
+        ls -la packages/
+
+    - name: Upload packages
+      if: matrix.arch == 'amd64'
+      uses: actions/upload-artifact@v4
+      with:
+        name: simple-multi-arch-packages
+        path: packages/*.deb
+        retention-days: 30
+
+

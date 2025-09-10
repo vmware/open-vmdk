@@ -11,6 +11,10 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: write
+  actions: write
+
 jobs:
   create-release-packages:
     runs-on: ubuntu-latest
