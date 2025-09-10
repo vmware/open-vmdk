@@ -14,6 +14,8 @@ jobs:
     strategy:
       matrix:
         arch: [amd64, arm64]
+        distro: [ubuntu-24.04, debian-bookworm]
+      fail-fast: false
 
     steps:
     - name: Checkout code
@@ -37,11 +39,22 @@ jobs:
         echo "Current directory contents:"
         ls -la
 
-    - name: Build and test on ${{ matrix.arch }}
+    - name: Build and test on ${{ matrix.distro }} (${{ matrix.arch }})
       run: |
+        # Set the correct base image based on the distro
+        BASE_IMAGE=""
+        if [[ "${{ matrix.distro }}" == "ubuntu-24.04" ]]; then
+          BASE_IMAGE="ubuntu:24.04"
+        elif [[ "${{ matrix.distro }}" == "debian-bookworm" ]]; then
+          BASE_IMAGE="debian:bookworm"
+        else
+          echo "ERROR: Unknown distro ${{ matrix.distro }}"
+          exit 1
+        fi
+        
         # Create a Dockerfile for building and testing
-        cat > Dockerfile.test << 'EOF'
-        FROM ubuntu:24.04
+        cat > Dockerfile.test << EOF
+        FROM ${BASE_IMAGE}
 
         # Install build dependencies
         RUN apt-get update && apt-get install -y \
@@ -94,25 +107,25 @@ jobs:
         EOF
 
         # Build and run the test with error handling
-        echo "Building Docker image for ${{ matrix.arch }}..."
+        echo "Building Docker image for ${{ matrix.distro }} (${{ matrix.arch }})..."
         if docker buildx build \
           --platform linux/${{ matrix.arch }} \
           --file Dockerfile.test \
-          --tag open-vmdk-test:${{ matrix.arch }} \
+          --tag open-vmdk-test:${{ matrix.distro }}-${{ matrix.arch }} \
           --progress=plain \
           --load \
           . ; then
-          echo "Docker build completed successfully for ${{ matrix.arch }}"
+          echo "Docker build completed successfully for ${{ matrix.distro }} (${{ matrix.arch }})"
 
           # Verify the image was created and tagged correctly
-          if docker image inspect open-vmdk-test:${{ matrix.arch }} >/dev/null 2>&1; then
+          if docker image inspect open-vmdk-test:${{ matrix.distro }}-${{ matrix.arch }} >/dev/null 2>&1; then
             echo "Docker image verified successfully"
           else
             echo "ERROR: Docker image was not created properly"
             exit 1
           fi
         else
-          echo "ERROR: Docker build failed for ${{ matrix.arch }}"
+          echo "ERROR: Docker build failed for ${{ matrix.distro }} (${{ matrix.arch }})"
           echo "Build logs should be visible above"
           exit 1
         fi
@@ -121,14 +134,14 @@ jobs:
       if: matrix.arch == 'amd64'  # Only extract from one architecture to avoid conflicts
       run: |
         # Verify the Docker image exists
-        if ! docker image inspect open-vmdk-test:${{ matrix.arch }} >/dev/null 2>&1; then
-          echo "ERROR: Docker image open-vmdk-test:${{ matrix.arch }} not found"
+        if ! docker image inspect open-vmdk-test:${{ matrix.distro }}-${{ matrix.arch }} >/dev/null 2>&1; then
+          echo "ERROR: Docker image open-vmdk-test:${{ matrix.distro }}-${{ matrix.arch }} not found"
           exit 1
         fi
 
         # Create container and copy packages out
-        echo "Creating container from open-vmdk-test:${{ matrix.arch }}..."
-        if ! docker create --name temp-container open-vmdk-test:${{ matrix.arch }}; then
+        echo "Creating container from open-vmdk-test:${{ matrix.distro }}-${{ matrix.arch }}..."
+        if ! docker create --name temp-container open-vmdk-test:${{ matrix.distro }}-${{ matrix.arch }}; then
           echo "ERROR: Failed to create container from image"
           exit 1
         fi
@@ -171,7 +184,7 @@ jobs:
       if: matrix.arch == 'amd64'
       uses: actions/upload-artifact@v4
       with:
-        name: debian-packages-${{ matrix.arch }}
+        name: packages-${{ matrix.distro }}-${{ matrix.arch }}
         path: packages/*.deb
         retention-days: 30
 

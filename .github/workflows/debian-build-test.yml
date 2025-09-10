@@ -10,10 +10,14 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    container:
+      # Use the appropriate container based on the distro
+      image: ${{ matrix.distro == 'debian-bookworm' && 'debian:bookworm' || matrix.distro == 'ubuntu-22.04' && 'ubuntu:22.04' || 'ubuntu:24.04' }}
     strategy:
       matrix:
-        # Test on multiple Ubuntu versions
-        ubuntu-version: ['20.04', '22.04', '24.04']
+        # Test on multiple distro versions
+        distro: ['ubuntu-22.04', 'ubuntu-24.04', 'debian-bookworm']
+      fail-fast: false
     
     steps:
     - name: Checkout code
@@ -21,8 +25,8 @@ jobs:
 
     - name: Set up build environment
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
+        apt-get update
+        apt-get install -y \
           build-essential \
           debhelper \
           devscripts \
@@ -34,7 +38,7 @@ jobs:
 
     - name: Install runtime dependencies for testing
       run: |
-        sudo apt-get install -y \
+        apt-get install -y \
           coreutils \
           grep \
           python3-lxml \
@@ -58,8 +62,8 @@ jobs:
         else
           echo "Standard build failed, trying manual build..."
           debian/rules clean
-          if debian/rules build && sudo debian/rules binary; then
-            sudo chown -R $(id -u):$(id -g) debian/ ../*.deb 2>/dev/null || true
+          if debian/rules build && debian/rules binary; then
+            chown -R $(id -u):$(id -g) debian/ ../*.deb 2>/dev/null || true
             echo "Manual build succeeded"
             BUILD_SUCCESS=true
           else
@@ -116,9 +120,9 @@ jobs:
       run: |
         echo "Installing packages..."
         # Both packages should exist at this point
-        sudo dpkg -i ../open-vmdk_*.deb ../ovfenv_*.deb || true
+        dpkg -i ../open-vmdk_*.deb ../ovfenv_*.deb || true
         # Fix any dependency issues
-        sudo apt-get install -f -y
+        apt-get install -f -y
 
     - name: Test installed binaries
       run: |
@@ -192,7 +196,7 @@ jobs:
     - name: Upload packages as artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: debian-packages-ubuntu-${{ matrix.ubuntu-version }}
+        name: debian-packages-${{ matrix.distro }}
         path: packages/*.deb
         retention-days: 30
 
@@ -200,7 +204,7 @@ jobs:
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: build-logs-ubuntu-${{ matrix.ubuntu-version }}
+        name: build-logs-${{ matrix.distro }}
         path: |
           debian/
         retention-days: 7
