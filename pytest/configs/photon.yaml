@@ -47,5 +47,3 @@ annotation:
       password for root user is changeme. However user will be prompted
       to change the password during first login.
 
-eula:
-    file: !param eulafile=EULA.txt
