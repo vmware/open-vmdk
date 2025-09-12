@@ -106,7 +106,7 @@ class VssdSystem(VirtualHardware):
     def xml_item(self, element_name):
         attrs = {}
         item = ET.Element('{%s}System' % NS_OVF, attrs)
-        
+
         item.append(self.xml_element('ElementName', element_name))
         item.append(self.xml_element('InstanceID', 0))
         item.append(self.xml_element('VirtualSystemIdentifier', self.identifier))
@@ -163,7 +163,7 @@ class RasdItem(VirtualHardware):
             attrs["{%s}configuration" % NS_OVF] = self.configuration
 
         item = ET.Element('{%s}Item' % NS_OVF, attrs)
-        
+
         item.append(self.xml_element('ResourceType', self.resource_type))
         item.append(self.xml_element('InstanceID', self.instance_id))
         item.append(self.xml_element('Description', self.description))
@@ -201,7 +201,7 @@ class RasdCpus(RasdItem):
         item = super().xml_item(required, element_name)
         item.append(self.xml_element('AllocationUnits', 'hertz * 10^6'))
         item.append(self.xml_element('VirtualQuantity', self.num))
-        
+
         return item
 
 
@@ -228,7 +228,7 @@ class RasdMemory(RasdItem):
         item = super().xml_item(required, element_name)
         item.append(self.xml_element('AllocationUnits', 'byte * 2^20'))
         item.append(self.xml_element('VirtualQuantity', self.size))
-        
+
         return item
 
 
@@ -271,7 +271,7 @@ class RasdScsiController(RasdController):
     def xml_item(self, required, element_name):
         item = super().xml_item(required, element_name)
         item.append(self.xml_element('ResourceSubType', self.subtype))
-        
+
         return item
 
 
@@ -295,7 +295,7 @@ class RasdNvmeController(RasdController):
     def xml_item(self, required, element_name):
         item = super().xml_item(required, element_name)
         item.append(self.xml_element('ResourceSubType', 'vmware.nvme.controller'))
-        
+
         return item
 
 
@@ -509,7 +509,7 @@ class RasdEthernet(RasdItem):
         item.append(self.xml_element('Connection', self.network.name))
         if self.address:
             item.append(self.xml_element('Address', self.address))
-        
+
         return item
 
 
@@ -530,7 +530,7 @@ class OVFNetwork(object):
         item_desc = ET.Element('{%s}Description' % NS_OVF)
         item_desc.text = f"The {self.name} Network"
         item.append(item_desc)
-        
+
         return item
 
 
@@ -685,8 +685,17 @@ class OVFProperty(object):
             '{%s}key' % NS_OVF: self.key,
             '{%s}type' % NS_OVF: self.type
         }
+
+        # Handle the default value for the property
         if self.value is not None:
-            xml_attrs['{%s}value' % NS_OVF] = str(self.value)
+            # Simple string value (backward compatible)
+            if not isinstance(self.value, dict):
+                xml_attrs['{%s}value' % NS_OVF] = str(self.value)
+            # Dictionary with configuration-specific values
+            elif 'default' in self.value:
+                xml_attrs['{%s}value' % NS_OVF] = str(self.value['default'])
+
+        # Add other standard attributes
         if self.qualifiers is not None:
             xml_attrs['{%s}qualifiers' % NS_OVF] = self.qualifiers
         if self.user_configurable:
@@ -695,11 +704,24 @@ class OVFProperty(object):
             xml_attrs['{%s}password' % NS_OVF] = "true"
         if self.required is not None:
             xml_attrs['{%s}required' % NS_OVF] = "true" if self.required else "false"
+
         xml_property = ET.Element('{%s}Property' % NS_OVF, xml_attrs)
+
+        # Add label and description
         if self.label is not None:
             xml_property.append(xml_text_element('{%s}Label' % NS_OVF, self.label))
         if self.description is not None:
             xml_property.append(xml_text_element('{%s}Description' % NS_OVF, self.description))
+
+        # Add configuration-specific values if present
+        if isinstance(self.value, dict) and 'configurations' in self.value:
+            for config_id, config_value in self.value['configurations'].items():
+                config_elem = ET.Element('{%s}Value' % NS_OVF, {
+                    '{%s}value' % NS_OVF: str(config_value),
+                    '{%s}configuration' % NS_OVF: config_id
+                })
+                xml_property.append(config_elem)
+
         return xml_property
 
 
@@ -1104,7 +1126,7 @@ class OVF(object):
         network_section = ET.Element('{%s}NetworkSection' % NS_OVF)
         network_section.append(xml_text_element('{%s}Info' % NS_OVF, "Virtual Networks"))
         for nw_id, nw in self.networks.items():
-            network_section.append(nw.xml_item())        
+            network_section.append(nw.xml_item())
         envelope.append(network_section)
 
         # VirtualSystem
