@@ -661,17 +661,19 @@ class OVFProperty(object):
                  password = False,
                  value=None,
                  user_configurable=False, qualifiers=None,
-                 label=None, description=None, category=None, required=None):
-        self.key = key
-        self.type = type
-        self.password = password
-        self.value = value
-        self.user_configurable = user_configurable
-        self.qualifiers = qualifiers
-        self.label = label
-        self.description = description
+                 label=None, description=None, category=None, required=None, configuration=None):
+
         self.category = category
+        self.configuration = configuration
+        self.description = description
+        self.key = key
+        self.label = label
+        self.password = password
+        self.qualifiers = qualifiers
         self.required = required
+        self.type = type
+        self.user_configurable = user_configurable
+        self.value = value
 
 
     @classmethod
@@ -687,6 +689,7 @@ class OVFProperty(object):
         }
 
         # Handle the default value for the property
+        # DSP0243 2.1.1 line 1026
         if self.value is not None:
             # Simple string value (backward compatible)
             if not isinstance(self.value, dict):
@@ -700,6 +703,8 @@ class OVFProperty(object):
             xml_attrs['{%s}qualifiers' % NS_OVF] = self.qualifiers
         if self.user_configurable:
             xml_attrs['{%s}userConfigurable' % NS_OVF] = "true"
+        if self.configuration is not None:
+            xml_attrs['{%s}configuration' % NS_OVF] = self.configuration
         if self.password:
             xml_attrs['{%s}password' % NS_OVF] = "true"
         if self.required is not None:
@@ -714,6 +719,7 @@ class OVFProperty(object):
             xml_property.append(xml_text_element('{%s}Description' % NS_OVF, self.description))
 
         # Add configuration-specific values if present
+        # DSP0243 2.1.1 line 1026
         if isinstance(self.value, dict) and 'configurations' in self.value:
             for config_id, config_value in self.value['configurations'].items():
                 config_elem = ET.Element('{%s}Value' % NS_OVF, {
