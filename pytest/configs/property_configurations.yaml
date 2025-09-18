@@ -1,0 +1,99 @@
+system:
+    name: minimal
+    type: vmx-14 vmx-20
+    os_vmw: vmwarePhoton64Guest
+    default_configuration: grande
+
+networks:
+    vm_network:
+        name: "None"
+        description: "The None network"
+
+hardware:
+    cpus_small:
+        type: cpus
+        number: 2
+        configuration: tall
+    cpus_medium:
+        type: cpus
+        number: 4
+        configuration: grande
+    cpus_large:
+        type: cpus
+        number: 8
+        configuration: venti
+    memory_small:
+        type: memory
+        size: 2048
+        configuration: tall
+    memory_medium:
+        type: memory
+        size: 4096
+        configuration: grande
+    memory_large:
+        type: memory
+        size: 8192
+        configuration: venti
+    sata1:
+        type: sata_controller
+    rootdisk:
+        type: hard_disk
+        parent: sata1
+        disk_image: dummy.vmdk
+    ethernet1:
+        type: ethernet
+        subtype: VmxNet3
+        network: vm_network
+
+configurations:
+    tall:
+        label: Tall
+        description: Small configuration with minimal resources
+    grande:
+        label: Grande
+        description: Medium configuration with balanced resources
+    venti:
+        label: Venti
+        description: Large configuration with maximum resources
+
+environment:
+    transports:
+        - com.vmware.guestInfo
+    categories:
+        system: System Settings
+    properties:
+        # Legacy format property
+        hostname:
+            type: string
+            value: "default-hostname"
+            user_configurable: true
+            label: "Hostname"
+            description: "The hostname for this appliance"
+            category: system
+            
+        # New format with configuration-specific values
+        memory.size:
+            type: string
+            label: "Memory Size"
+            description: "Amount of memory to allocate"
+            user_configurable: true
+            category: system
+            value:
+                default: "2048"  # Default value when no configuration is selected
+                configurations:
+                    tall: "1024"
+                    grande: "2048"
+                    venti: "4096"
+                    
+        cpu.count:
+            type: string
+            label: "CPU Count"
+            description: "Number of CPUs to allocate"
+            user_configurable: true
+            category: system
+            value:
+                default: "2"
+                configurations:
+                    tall: "2"
+                    grande: "4"
+                    venti: "8"
