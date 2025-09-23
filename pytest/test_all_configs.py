@@ -160,6 +160,22 @@ class TestAllConfigs:
                 self.assert_values(cfg_hardware_section[key].get('subtype'), cfg_vmw_ovf[idx].get('rasd:ResourceSubType'))
                 self.assert_values(cfg_hardware_section[key].get('connected'), cfg_vmw_ovf[idx].get('rasd:AutomaticAllocation'))
 
+            if isinstance(cfg_hardware_section[key], dict) and cfg_hardware_section[key].get('config') is not None:
+                cfg_config = cfg_hardware_section[key]['config']
+                ovf_config = cfg_vmw_ovf[idx].get('vmw:Config')
+                for i, cfg in enumerate(cfg_config):
+                    if isinstance(ovf_config, list):
+                        ovf_keys = [props['@vmw:key'] for props in ovf_config]
+                        ovf_values = [props['@vmw:value'] for props in ovf_config]
+                        assert cfg in ovf_keys
+                        cfg_value = cfg_config[cfg]
+                        if type(cfg_value) is bool:
+                            cfg_value = "true" if cfg_value else "false"
+                        assert cfg_value == ovf_values[ovf_keys.index(cfg)]
+                    else:
+                        assert cfg == ovf_config['@vmw:key']
+                        self.assert_values(cfg_config[cfg], ovf_config['@vmw:value'])
+
 
     def test_configuration_configs(self):
         #Deployment Option Section
