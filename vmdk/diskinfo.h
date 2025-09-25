@@ -31,10 +31,13 @@ typedef struct {
     int (*abort)(DiskInfo *self);
     ssize_t (*copyDisk)(DiskInfo *self, DiskInfo *src, int numThreads);
     bool (*checkGrainOrder)(DiskInfo *self);  /* Returns true if grains are ordered in the grain table */
+    char *(*getDescriptor)(DiskInfo *self);   /* Returns the descriptor file content if available, NULL otherwise */
 } DiskInfoVMT;
 
 struct DiskInfo {
     const DiskInfoVMT *vmt;
+    char *toolsVersion;
+    int sectorSize;
 };
 
 extern char *toolsVersion; /* toolsVersion in metadata */

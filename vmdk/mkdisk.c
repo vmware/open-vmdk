@@ -109,10 +109,12 @@ printUsage(char *cmd, int compressionLevel, int numThreads)
 {
     printf("Usage:\n");
     printf("%s -i [--detailed] src.vmdk: displays information for specified virtual disk\n", cmd);
+    printf("%s --get-descriptor src.vmdk: prints the descriptor file content to stdout\n", cmd);
     printf("%s [-c compressionlevel] [-n threads] [-t toolsVersion] [--noreorder] src.vmdk dst.vmdk: converts source disk to destination disk with given tools version\n\n", cmd);
     printf("-c <level> sets the compression level. Valid values are 1 (fastest) to 9 (best). Only when writing to VMDK. Current is %d.\n", compressionLevel);
     printf("-n <threads> sets the number of threads used for compression level. Only when writing to VMDK. Current is (%d).\n", numThreads);
     printf("--detailed shows detailed sparse extent header information (only with -i)\n");
+    printf("--get-descriptor prints the descriptor file content to stdout\n");
     printf("--noreorder disables grain reordering after compression (default: reordering enabled)\n");
 
     return 1;
@@ -151,6 +153,7 @@ main(int argc,
     bool doDetailed = false;
     bool doConvert = false;
     bool doReorder = true;  // Default to true for backward compatibility
+    bool doGetDescriptor = false;
     int compressionLevel = Z_BEST_COMPRESSION;
     int numThreads = get_nprocs();
     const char *env;
@@ -159,6 +162,7 @@ main(int argc,
         {"detailed", no_argument, 0, 'd'},
         {"help", no_argument, 0, 'h'},
         {"noreorder", no_argument, 0, 'r'},
+        {"get-descriptor", no_argument, 0, 'g'},
         {0, 0, 0, 0}
     };
 
@@ -196,6 +200,9 @@ main(int argc,
         case 'd':
             doDetailed = true;
             break;
+        case 'g':
+            doGetDescriptor = true;
+            break;
         case 'n':
             if (!isNumber(optarg)) {
                 fprintf(stderr, "invalid threads value: %s\n", optarg);
@@ -231,7 +238,8 @@ main(int argc,
         exit(1);
     }
 
-    if (doInfo && doConvert) {
+    if ((doInfo && doConvert) || (doInfo && doGetDescriptor) || (doConvert && doGetDescriptor)) {
+        fprintf(stderr, "Error: -i, --get-descriptor and -t options are mutually exclusive\n");
         printUsage(argv[0], compressionLevel, numThreads);
         exit(1);
     }
@@ -257,7 +265,21 @@ main(int argc,
         fprintf(stderr, "Cannot open source disk %s: %s\n", src, strerror(errno));
         exit(1);
     } else {
-        if (doInfo) {
+        if (doGetDescriptor) {
+            // Handle --get-descriptor option
+            if (isSparse && di->vmt->getDescriptor) {
+                char *descriptor = di->vmt->getDescriptor(di);
+                if (descriptor) {
+                    printf("%s", descriptor);
+                } else {
+                    fprintf(stderr, "No descriptor found in VMDK file\n");
+                    exit(1);
+                }
+            } else {
+                fprintf(stderr, "Error: --get-descriptor option only works with sparse VMDK files\n");
+                exit(1);
+            }
+        } else if (doInfo) {
             off_t capacity = di->vmt->getCapacity(di);
             off_t end = 0;
             off_t pos;

@@ -20,6 +20,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+struct DiskInfo;
+
 #pragma pack(push, 1)
 typedef struct {
     __le32  magicNumber;
@@ -109,5 +111,6 @@ typedef struct {
     SectorType  gdOffset;
     SectorType  overHead;
 } SparseExtentHeader;
+
 
 #endif /* _VMWARE_VMDK_H_ */
