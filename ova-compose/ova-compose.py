@@ -68,8 +68,12 @@ def xml_text_element(tag, value):
     return elem
 
 
-def xml_config(key, val):
-    return ET.Element('{%s}Config' % NS_VMW, { '{%s}required' % NS_OVF: 'false', '{%s}key' % NS_VMW: key, '{%s}value' % NS_VMW: val})
+def xml_config(key, value):
+    if type(value) is bool:
+        value = "true" if value else "false"
+    elif type(value) is not str:
+        value = str(value)
+    return ET.Element('{%s}Config' % NS_VMW, { '{%s}required' % NS_OVF: 'false', '{%s}key' % NS_VMW: key, '{%s}value' % NS_VMW: value})
 
 
 class ValidationError(Exception):
@@ -118,18 +122,23 @@ class VssdSystem(VirtualHardware):
 class RasdItem(VirtualHardware):
     last_instance_id = 0
     description = "Virtual Hardware Item"
-    config = {}
+    config = None
     connectable = False
     configuration = None
 
-    def __init__(self, subtype=None):
+
+    def __init__(self, subtype=None, config=None):
         RasdItem.last_instance_id += 1
         self.instance_id = RasdItem.last_instance_id
+        if config is not None:
+            if self.config is None:
+                self.config = {}
+            self.config.update(config)
 
 
     @classmethod
     def from_dict(cls, d):
-        return cls()
+        return cls(config=d.get('config'))
 
 
     def connect(self, ovf):
@@ -169,8 +178,9 @@ class RasdItem(VirtualHardware):
         item.append(self.xml_element('Description', self.description))
         item.append(self.xml_element('ElementName', element_name))
 
-        for key, val in sorted(self.config.items()):
-            item.append(xml_config(key, val))
+        if self.config is not None:
+            for key, val in sorted(self.config.items()):
+                item.append(xml_config(key, val))
 
         if self.connectable:
             item.append(self.xml_element('AutomaticAllocation', "true" if self.connected else "false"))
@@ -183,8 +193,8 @@ class RasdCpus(RasdItem):
     description = "Virtual CPUs"
 
 
-    def __init__(self, num):
-        super().__init__()
+    def __init__(self, num, config=None):
+        super().__init__(config=config)
         self.num = int(num)
 
 
@@ -193,7 +203,7 @@ class RasdCpus(RasdItem):
         if type(d) is int:
             item = cls(d)
         else:
-            item = cls(d['number'])
+            item = cls(d['number'], config=d.get('config'))
         return item
 
 
@@ -210,8 +220,8 @@ class RasdMemory(RasdItem):
     description = "Virtual Memory"
 
 
-    def __init__(self, size):
-        super().__init__()
+    def __init__(self, size, config=None):
+        super().__init__(config=config)
         self.size = int(size)
 
 
@@ -220,7 +230,7 @@ class RasdMemory(RasdItem):
         if type(d) is int:
             item = cls(d)
         else:
-            item = cls(d['size'])
+            item = cls(d['size'], config=d.get('config'))
         return item
 
 
@@ -234,15 +244,15 @@ class RasdMemory(RasdItem):
 
 class RasdController(RasdItem):
 
-    def __init__(self, subtype):
-        super().__init__()
+    def __init__(self, subtype, config=None):
+        super().__init__(config=config)
         self.next_child_address = 0
         self.subtype = subtype
 
 
     @classmethod
     def from_dict(cls, d):
-        item = cls(d.get('subtype', None))
+        item = cls(d.get('subtype', None), config=d.get('config'))
         return item
 
 
@@ -256,8 +266,8 @@ class RasdScsiController(RasdController):
     description = "SCSI Controller"
 
 
-    def __init__(self, subtype):
-        super().__init__(subtype)
+    def __init__(self, subtype, config=None):
+        super().__init__(subtype, config=config)
         self.next_child_address = 0
         # TODO: maintain valid settings in a structure instead of code:
         if self.subtype is None:
@@ -306,16 +316,15 @@ class RasdIdeController(RasdController):
 
 class RasdControllerItem(RasdItem):
 
-
-    def __init__(self, parent_id):
-        super().__init__()
+    def __init__(self, parent_id, config=None):
+        super().__init__(config=config)
         self.parent_id = parent_id
         self.rasd_parent = None
 
 
     @classmethod
     def from_dict(cls, d):
-        item = cls(d['parent'])
+        item = cls(d['parent'], config=d.get('config'))
         return item
 
 
@@ -341,16 +350,16 @@ class RasdCdDrive(RasdControllerItem):
     connectable = True
 
 
-    def __init__(self, parent_id, image, connected=False):
-        super().__init__(parent_id)
-        self.image = image
+    def __init__(self, parent_id, image, connected=False, config=None):
         self.config = self.DEFAULT_CONFIG.copy()
+        super().__init__(parent_id, config=config)
+        self.image = image
         self.connected = connected
 
 
     @classmethod
     def from_dict(cls, d):
-        item = cls(d['parent'], d.get('image', None), d.get('connected', False))
+        item = cls(d['parent'], d.get('image', None), connected=d.get('connected', False), config=d.get('config'))
         return item
 
 
@@ -406,16 +415,16 @@ class RasdFloppy(RasdItem):
     connectable = True
 
 
-    def __init__(self, image, connected=False):
-        super().__init__()
-        self.image = image
+    def __init__(self, image, connected=False, config=None):
         self.config = self.DEFAULT_CONFIG.copy()
+        super().__init__(config=config)
+        self.image = image
         self.connected = connected
 
 
     @classmethod
     def from_dict(cls, d):
-        item = cls(d.get('image', None), d.get('connected', False))
+        item = cls(d.get('image', None), d.get('connected', False), config=d.get('config'))
         return item
 
 
@@ -440,9 +449,9 @@ class RasdVideoCard(RasdItem):
     connected = False
 
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, config=None):
         self.config = RasdVideoCard.DEFAULT_CONFIG.copy()
+        super().__init__(config=config)
 
 
     def xml_item(self, required, element_name):
@@ -456,14 +465,14 @@ class RasdHardDisk(RasdControllerItem):
     description = "Hard Disk"
 
 
-    def __init__(self, parent_id, disk):
-        super().__init__(parent_id)
+    def __init__(self, parent_id, disk, config=None):
+        super().__init__(parent_id, config=config)
         self.disk = disk
 
 
     @classmethod
     def from_dict(cls, d):
-        item = cls(d['parent'], d['disk'])
+        item = cls(d['parent'], d['disk'], config=d.get('config'))
         return item
 
 
@@ -484,9 +493,9 @@ class RasdEthernet(RasdItem):
     connectable = True
 
 
-    def __init__(self, network_id, subtype, connected=True, address=None):
-        super().__init__()
+    def __init__(self, network_id, subtype, connected=True, address=None, config=None):
         self.config = RasdEthernet.DEFAULT_CONFIG.copy()
+        super().__init__(config=config)
         self.network_id = network_id
         self.subtype = subtype
         self.connected = connected
@@ -495,7 +504,7 @@ class RasdEthernet(RasdItem):
 
     @classmethod
     def from_dict(cls, d):
-        item = cls(d['network'], d['subtype'], d.get('connected', True), d.get('address', None))
+        item = cls(d['network'], d['subtype'], connected=d.get('connected', True), address=d.get('address'), config=d.get('config'))
         return item
 
 
