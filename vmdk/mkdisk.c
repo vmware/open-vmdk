@@ -26,6 +26,7 @@
 #include <string.h>
 #include <getopt.h>
 #include <zlib.h>
+#include <ctype.h>
 
 /* toolsVersion in metadata -
    default is 2^31-1 (unknown) */
@@ -63,7 +64,7 @@ copyData(DiskInfo *dst,
         }
         if (dst->vmt->pwrite(dst, buf, readLen, dstOffset) != (ssize_t)readLen) {
             return -1;
-        }        
+        }
         srcOffset += readLen;
         dstOffset += readLen;
     }
@@ -139,6 +140,128 @@ isNumber(const char *text)
         return false;
     }
     return true;
+}
+
+/* Parse the descriptor file and return a JSON string with the key-value pairs */
+static char *
+parseDescriptorFile(const char *descriptor)
+{
+    char *result = NULL;
+    char *line, *saveptr1 = NULL;
+    char *descriptor_copy = NULL;
+    size_t result_size = 0;
+    size_t result_capacity = 1024; // Initial capacity
+    bool first_entry = true;
+
+    if (!descriptor) {
+        return NULL;
+    }
+
+    // Allocate memory for the result
+    result = malloc(result_capacity);
+    if (!result) {
+        return NULL;
+    }
+
+    // Initialize the result string with opening brace
+    strcpy(result, "{}");
+    result_size = 2;
+
+    // Make a copy of the descriptor to avoid modifying the original
+    descriptor_copy = strdup(descriptor);
+    if (!descriptor_copy) {
+        free(result);
+        return NULL;
+    }
+
+    // Parse each line of the descriptor
+    line = strtok_r(descriptor_copy, "\n", &saveptr1);
+    while (line != NULL) {
+        // Skip comments and empty lines
+        if (line[0] != '#' && strlen(line) > 0) {
+            char *key = NULL;
+            char *value = NULL;
+
+            // Find the equals sign
+            char *equals = strchr(line, '=');
+            if (equals) {
+                // Split the line into key and value
+                *equals = '\0';
+                key = line;
+                value = equals + 1;
+
+                // Trim whitespace from key and value
+                while (*key && isspace(*key)) key++;
+                while (*value && isspace(*value)) value++;
+
+                // Remove trailing whitespace from key
+                char *end = key + strlen(key) - 1;
+                while (end > key && isspace(*end)) {
+                    *end = '\0';
+                    end--;
+                }
+
+                // Remove trailing whitespace from value
+                end = value + strlen(value) - 1;
+                while (end > value && isspace(*end)) {
+                    *end = '\0';
+                    end--;
+                }
+
+                // Remove quotes from value if present
+                if (*value == '"' && value[strlen(value) - 1] == '"') {
+                    value[strlen(value) - 1] = '\0';
+                    value++;
+                }
+
+                // Add the key-value pair to the result
+                if (strlen(key) > 0) {
+                    // Calculate the required space for this entry
+                    size_t entry_size = strlen(key) + strlen(value) + 10; // 10 for quotes, colon, comma, etc.
+
+                    // Ensure we have enough space
+                    if (result_size + entry_size > result_capacity) {
+                        result_capacity *= 2;
+                        char *new_result = realloc(result, result_capacity);
+                        if (!new_result) {
+                            free(result);
+                            free(descriptor_copy);
+                            return NULL;
+                        }
+                        result = new_result;
+                    }
+
+                    // Insert before the closing brace
+                    result[result_size - 1] = '\0'; // Remove closing brace
+
+                    // Add comma if not the first entry
+                    if (!first_entry) {
+                        strcat(result, ", ");
+                        result_size += 2;
+                    } else {
+                        first_entry = false;
+                    }
+
+                    // Add the key-value pair
+                    strcat(result, "\"");
+                    strcat(result, key);
+                    strcat(result, "\": \"");
+                    strcat(result, value);
+                    strcat(result, "\"");
+                    strcat(result, "}");
+
+                    // Update result_size
+                    result_size = strlen(result);
+                }
+            }
+        }
+
+        // Get the next line
+        line = strtok_r(NULL, "\n", &saveptr1);
+    }
+
+    free(descriptor_copy);
+    return result;
 }
 
 int
@@ -323,6 +446,18 @@ main(int argc,
                     printf("}");
                 } else {
                     printf(", \"error\": \"detailed information only available for sparse VMDK files\"");
+                }
+            }
+
+            // Add parsed descriptor file if available
+            if (doDetailed && isSparse && di->vmt->getDescriptor) {
+                char *descriptor = di->vmt->getDescriptor(di);
+                if (descriptor) {
+                    char *parsed_descriptor = parseDescriptorFile(descriptor);
+                    if (parsed_descriptor) {
+                        printf(", \"descriptorFile\": %s", parsed_descriptor);
+                        free(parsed_descriptor);
+                    }
                 }
             }
 
