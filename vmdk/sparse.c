@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include <zlib.h>
 
@@ -1560,6 +1561,55 @@ static DiskInfoVMT sparseVMT = {
     .checkGrainOrder = SparseCheckGrainOrder
 };
 
+/* Sparse VMDK files optionally have a footer near the end of the file,
+   containing the SparseExtentHeader. If present, it overrides the header
+   at the beginning of the file.
+ 
+   A valid footer is preceded a meta data marker with type GRAIN_MARKER_FOOTER.
+
+   If a valid footer is found, it is copied to the memory pointed to by footer.
+*/
+
+static bool
+readSparseFooter(int fd, SparseExtentHeaderOnDisk *footer)
+{
+    off_t offset;
+    struct stat sb;
+    SparseMetaDataMarkerOnDisk metaMarker;
+    SparseExtentHeaderOnDisk onDisk;
+
+    if (fstat(fd, &sb) != 0) {
+        fprintf(stderr, "fstat failed: %s (fd=%d)\n", strerror(errno), fd);
+        return false;
+    }
+
+    offset = (sb.st_size - 3 * VMDK_SECTOR_SIZE) & ~(VMDK_SECTOR_SIZE - 1);
+    if (!safePread(fd, &metaMarker, sizeof metaMarker, offset)) {
+        return false;
+    }
+
+    if (metaMarker.size != 0) {
+        return false;
+    }
+
+    if (__le32_to_cpu(metaMarker.type) != GRAIN_MARKER_FOOTER) {
+        return false;
+    }
+
+    offset = (sb.st_size - 2 * VMDK_SECTOR_SIZE) & ~(VMDK_SECTOR_SIZE - 1);
+    if (!safePread(fd, &onDisk, sizeof onDisk, offset)) {
+        return false;
+    }
+
+    if (!checkSparseExtentHeader(&onDisk)) {
+        return false;
+    }
+
+    memcpy(footer, &onDisk, sizeof onDisk);
+
+    return true;
+}
+
 DiskInfo *
 Sparse_Open(const char *fileName)
 {
@@ -1580,6 +1630,9 @@ Sparse_Open(const char *fileName)
     if (!checkSparseExtentHeader(&onDisk)) {
         goto failFd;
     }
+
+    readSparseFooter(fd, &onDisk);
+
     sdi = malloc(sizeof *sdi);
     if (!sdi) {
         goto failFd;
