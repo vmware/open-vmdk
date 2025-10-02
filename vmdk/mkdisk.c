@@ -34,9 +34,9 @@ char *toolsVersion = "2147483647";
 // Forward declaration for sparse disk structure
 typedef struct {
     DiskInfo hdr;
+    bool hasFooter;
     SparseExtentHeader diskHdr;
-    void *gtInfo;  // We don't need the full structure, just the header
-    int fd;
+    // We don't need the full structure, just the header
 } SparseDiskInfo;
 
 static int
@@ -297,6 +297,7 @@ main(int argc,
                     if (di->vmt->checkGrainOrder) {
                         printf(", \"grainsOrdered\": %s", di->vmt->checkGrainOrder(di) ? "true" : "false");
                     }
+                    printf(", \"hasFooter\": %s", sdi->hasFooter ? "true" : "false");
                     printf("}");
                 } else {
                     printf(", \"error\": \"detailed information only available for sparse VMDK files\"");

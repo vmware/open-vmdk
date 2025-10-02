@@ -76,13 +76,23 @@ typedef struct {
 } SparseSpecialLBAHeaderOnDisk;
 #pragma pack(pop)
 
+typedef uint64_t SectorType;
+
+#pragma pack(push, 1)
+typedef struct {
+    SectorType numSectors;
+    uint32_t size;
+    uint32_t type;
+    uint8_t pad[496];
+    uint8_t metadata[0];
+} SparseMetaDataMarkerOnDisk;
+#pragma pack(pop)
+
 #define GRAIN_MARKER_EOS                0
 #define GRAIN_MARKER_GRAIN_TABLE        1
 #define GRAIN_MARKER_GRAIN_DIRECTORY    2
 #define GRAIN_MARKER_FOOTER             3
 #define GRAIN_MARKER_PROGRESS           4
-
-typedef uint64_t SectorType;
 
 typedef struct {
     uint32_t    version;
