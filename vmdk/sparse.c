@@ -78,6 +78,7 @@ typedef struct StreamOptimizedDiskInfo {
 
 typedef struct SparseDiskInfo {
     DiskInfo hdr;
+    bool hasFooter;
     SparseExtentHeader diskHdr;
     SparseGTInfo gtInfo;
     int fd;
@@ -1631,13 +1632,14 @@ Sparse_Open(const char *fileName)
         goto failFd;
     }
 
-    readSparseFooter(fd, &onDisk);
-
     sdi = malloc(sizeof *sdi);
     if (!sdi) {
         goto failFd;
     }
     memset(sdi, 0, sizeof *sdi);
+
+    sdi->hasFooter = readSparseFooter(fd, &onDisk);
+
     sdi->fd = fd;
     if (!getSparseExtentHeader(&sdi->diskHdr, &onDisk)) {
         goto failSdi;
