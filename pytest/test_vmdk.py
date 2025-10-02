@@ -27,8 +27,8 @@ VMDK_CONVERT=os.path.join(THIS_DIR, "..", "build", "vmdk", "vmdk-convert")
 WORK_DIR=os.path.join(os.getcwd(), "pytest-vmdk")
 
 
-#PHOTON_OVA_URL = "https://packages-prod.broadcom.com/photon/5.0/RC/ova/photon-uefi-hw14-5.0-4d5974638.aarch64.ova"
-PHOTON_OVA_URL = "https://packages.vmware.com/photon/5.0/RC/ova/photon-uefi-hw14-5.0-4d5974638.aarch64.ova"
+PHOTON_OVA_URL = "https://packages-prod.broadcom.com/photon/5.0/RC/ova/photon-uefi-hw14-5.0-4d5974638.aarch64.ova"
+#PHOTON_OVA_URL = "https://packages.vmware.com/photon/5.0/RC/ova/photon-uefi-hw14-5.0-4d5974638.aarch64.ova"
 PHOTON_OVA_SHA512 = "d02d9f8c4e35aa4a1d425174dd531983572809d39cf18854d236147213d84917db960d61ae53cefbf6ac15826d45143cd39012ff3ff4ee36ad65d9c937bc792e"
 PHOTON_VMDK = "photon-disk1.vmdk"
 PHOTON_RAWIMAGE_PATH = os.path.join(WORK_DIR, "photon-disk1.img")
@@ -38,7 +38,8 @@ PHOTON_DISK2_UUID = "ABC1D7E1-B1EF-43F2-849D-9D5955B228BF"
 
 def download(url: str, local_filepath: str):
     print(f"Starting download from: {url}")
-    with urllib.request.urlopen(url) as response, open(local_filepath, 'wb') as out_file:
+    request = urllib.request.Request(url, headers={'User-Agent': "Mosaic/0.9"})
+    with urllib.request.urlopen(request) as response, open(local_filepath, 'wb') as out_file:
         shutil.copyfileobj(response, out_file)
 
 
