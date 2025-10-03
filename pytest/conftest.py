@@ -43,6 +43,12 @@ def setup_test(request):
     process = subprocess.run([VMDK_CONVERT, "dummy.img", "dummy.vmdk"], cwd=WORK_DIR)
     assert process.returncode == 0
 
+    process = subprocess.run([VMDK_CONVERT, "--sector-size", "512", "dummy.img", "dummy-512.vmdk"], cwd=WORK_DIR)
+    assert process.returncode == 0
+
+    process = subprocess.run([VMDK_CONVERT, "--sector-size", "4096", "dummy.img", "dummy-4k.vmdk"], cwd=WORK_DIR)
+    assert process.returncode == 0
+
     yield
     shutil.rmtree(WORK_DIR)
     WORK_DIR = os.path.join(os.getcwd(), "pytest-configs")

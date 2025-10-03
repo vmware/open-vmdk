@@ -155,6 +155,26 @@ def test_both(setup_test):
     assert hash == orig_hash, f"hash of {img_name_back} ({hash}) does not match that of original {img_name} ({orig_hash})"
 
 
+def test_sector_size(setup_test):
+    img_name = "random.img"
+    vmdk_name = "random.vmdk"
+
+    process = subprocess.run([VMDK_CONVERT, "-c", "6", "-n", "4", img_name, vmdk_name], cwd=WORK_DIR)
+    assert process.returncode == 0
+
+    detailed_dict = json.loads(subprocess.check_output([VMDK_CONVERT, "-i", "--detailed", vmdk_name], text=True, cwd=WORK_DIR))
+    assert detailed_dict['descriptorFile'].get('ddb.logicalSectorSize') is None
+    assert detailed_dict['descriptorFile'].get('ddb.physicalSectorSize') is None
+
+    for sector_size in ["512", "4096"]:
+        process = subprocess.run([VMDK_CONVERT, "-c", "6", "-n", "4", "--sector-size", sector_size, img_name, vmdk_name], cwd=WORK_DIR)
+        assert process.returncode == 0
+
+        detailed_dict = json.loads(subprocess.check_output([VMDK_CONVERT, "-i", "--detailed", vmdk_name], text=True, cwd=WORK_DIR))
+        assert detailed_dict['descriptorFile'].get('ddb.logicalSectorSize') == sector_size
+        assert detailed_dict['descriptorFile'].get('ddb.physicalSectorSize') == sector_size
+
+
 # test reading a VMDK generated with VMware disklik
 def test_photon_vmdk(setup_test):
 

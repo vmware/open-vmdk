@@ -1,0 +1,71 @@
+system:
+    name: minimal
+    type: vmx-14 vmx-20
+    os_vmw: vmw.vmwarePhoton64Guest
+
+networks:
+    vm_network:
+        name: "None"
+        description: "The None network"
+
+hardware:
+    cpus: 2
+    memory:
+        type: memory
+        size: 4096
+    sata1:
+        type: sata_controller
+    cdrom1:
+        type: cd_drive
+        parent: sata1
+    dummydisk:
+        type: hard_disk
+        parent: sata1
+        disk_image: dummy.vmdk
+    dummy512disk:
+        type: hard_disk
+        parent: sata1
+        disk_image: dummy-512.vmdk
+    dummy4kdisk:
+        type: hard_disk
+        parent: sata1
+        disk_image: dummy-4k.vmdk
+    dummy512disk_set:
+        type: hard_disk
+        parent: sata1
+        disk_image: dummy.vmdk
+        sector_size: 512
+    dummy4kdisk_set:
+        type: hard_disk
+        parent: sata1
+        disk_image: dummy.vmdk
+        sector_size: 4096
+    dummydisk_config:
+        type: hard_disk
+        parent: sata1
+        disk_image: dummy.vmdk
+        config:
+            virtualDiskFormat: emulated_512
+    dummydisk_config_null:
+        type: hard_disk
+        parent: sata1
+        disk_image: dummy.vmdk
+        config:
+            virtualDiskFormat: null
+    dummydisk_config_null2:
+        type: hard_disk
+        parent: sata1
+        disk_image: dummy.vmdk
+        config:
+            virtualDiskFormat: null
+            foo: bar
+    usb1:
+        type: usb_controller
+    ethernet1:
+        type: ethernet
+        subtype: VmxNet3
+        network: vm_network
+    videocard1:
+        type: video_card
+    vmci1:
+        type: vmci

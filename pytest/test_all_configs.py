@@ -30,11 +30,13 @@ class TestAllConfigs:
         self.config, self.ovf = get_configs
 
 
-    def assert_values(self, val1, val2):
+    def assert_values(self, val1, val2, msg=None):
+        if msg is None:
+            msg = ""
         if val1 is not None:
             if isinstance(val1, bool):
                 val2 = {"true": True, "false": False}[val2]
-            assert val1 == val2
+            assert val1 == val2, msg
 
 
     def test_product_sections_configs(self):
@@ -162,19 +164,25 @@ class TestAllConfigs:
 
             if isinstance(cfg_hardware_section[key], dict) and cfg_hardware_section[key].get('config') is not None:
                 cfg_config = cfg_hardware_section[key]['config']
-                ovf_config = cfg_vmw_ovf[idx].get('vmw:Config')
-                for i, cfg in enumerate(cfg_config):
-                    if isinstance(ovf_config, list):
-                        ovf_keys = [props['@vmw:key'] for props in ovf_config]
-                        ovf_values = [props['@vmw:value'] for props in ovf_config]
-                        assert cfg in ovf_keys
-                        cfg_value = cfg_config[cfg]
-                        if type(cfg_value) is bool:
-                            cfg_value = "true" if cfg_value else "false"
-                        assert cfg_value == ovf_values[ovf_keys.index(cfg)]
-                    else:
-                        assert cfg == ovf_config['@vmw:key']
-                        self.assert_values(cfg_config[cfg], ovf_config['@vmw:value'])
+                ovf_configs = cfg_vmw_ovf[idx].get('vmw:Config')
+
+                if ovf_configs is not None:
+                    if not isinstance(ovf_configs, list):
+                        ovf_configs = [ovf_configs]
+                    for key, value in cfg_config.items():
+                        found_key = False
+                        for ovf_cfg in ovf_configs:
+                            if ovf_cfg['@vmw:key'] == key:
+                                found_key = True
+                                self.assert_values(value, ovf_cfg['@vmw:value'], msg=f"value {ovf_cfg['@vmw:value']} for key {key} does not match expected {value}")
+                                break
+
+                        # if value is None, we don't want to find it (it's intended to remove that entry)
+                        assert found_key == (value is not None), f"key {key} not found on 'vmw:Config'" if not found_key else f"key {key} found in 'vmw:Config', but it's not expected because value is None"
+                else:
+                    # if there is no 'vmw:Config', but we do have 'config', it must be because all values are None
+                    for key, value in cfg_config.items():
+                        assert value is None
 
 
     def test_configuration_configs(self):
