@@ -81,6 +81,7 @@ typedef struct SparseDiskInfo {
     bool hasFooter;
     SparseExtentHeader diskHdr;
     SparseGTInfo gtInfo;
+    char *descriptor;  // Added to store the descriptor file content
     int fd;
 } SparseDiskInfo;
 
@@ -765,7 +766,7 @@ writeDescriptor(int fd, const SparseExtentHeader *hdr)
     do {
         cid = mrand48();
     } while (cid == 0xFFFFFFFFU || cid == 0xFFFFFFFEU);
-    
+
     descFile = makeDiskDescriptorFile("disk", hdr->capacity, cid);
     if (!descFile) {
         fprintf(stderr, "Failed to create descriptor file\n");
@@ -832,7 +833,7 @@ rewriteGrains(StreamOptimizedDiskInfo *sodi,
     /* Process grains in order */
     for (grainNr = 0; grainNr < sodi->writer.gtInfo.GTEs; grainNr++) {
         uint32_t oldSector = __le32_to_cpu(srcGT->gt[grainNr]);
-        
+
         /* Skip empty (0) and zero (1) grains */
         if (oldSector <= 1) {
             dstGT->gt[grainNr] = __cpu_to_le32(oldSector);
@@ -840,7 +841,7 @@ rewriteGrains(StreamOptimizedDiskInfo *sodi,
         }
 
 #ifdef DEBUG
-        printf("DEBUG: Processing grain %llu: old sector=%u, new sector=%u (sequential)\n", 
+        printf("DEBUG: Processing grain %llu: old sector=%u, new sector=%u (sequential)\n",
                (unsigned long long)grainNr, oldSector, nextSector);
 #endif
 
@@ -852,7 +853,7 @@ rewriteGrains(StreamOptimizedDiskInfo *sodi,
 
         uint32_t cmpSize;
         uint32_t hdrlen;
-        
+
         /* Parse header based on format */
         if (sodi->diskHdr.flags & SPARSEFLAG_EMBEDDED_LBA) {
             SparseGrainLBAHeaderOnDisk *hdr = (SparseGrainLBAHeaderOnDisk *)readBuf;
@@ -864,7 +865,7 @@ rewriteGrains(StreamOptimizedDiskInfo *sodi,
         }
 
 #ifdef DEBUG
-        printf("DEBUG: Grain %llu has compressed size %u, header length %u\n", 
+        printf("DEBUG: Grain %llu has compressed size %u, header length %u\n",
                (unsigned long long)grainNr, cmpSize, hdrlen);
 #endif
 
@@ -888,7 +889,7 @@ rewriteGrains(StreamOptimizedDiskInfo *sodi,
         size_t totalSize = VMDK_SECTOR_SIZE + remainingLength;
 
 #ifdef DEBUG
-        printf("DEBUG: Writing grain %llu to temp file at sector %u (sequential), size %zu\n", 
+        printf("DEBUG: Writing grain %llu to temp file at sector %u (sequential), size %zu\n",
                (unsigned long long)grainNr, nextSector, totalSize);
 #endif
 
@@ -1186,7 +1187,7 @@ StreamOptimizedClose(DiskInfo *self)
             goto failAll;
         }
     }
-    
+
     if (!writeEOS(&sodi->writer)) {
         fprintf(stderr, "Failed to write EOS marker\n");
         goto failAll;
@@ -1484,6 +1485,12 @@ SparseClose(DiskInfo *self)
 
     free(sdi->gtInfo.gd);
     fd = sdi->fd;
+
+    // Free the descriptor if it exists
+    if (sdi->descriptor) {
+        free(sdi->descriptor);
+    }
+
     free(sdi);
     return close(fd);
 }
@@ -1503,7 +1510,7 @@ areGrainsOrdered(const SparseGTInfo *gtInfo)
     /* Iterate through the grain table */
     for (i = 0; i < gtInfo->GTEs; i++) {
         uint32_t sector = __le32_to_cpu(gtInfo->gt[i]);
-        
+
         /* Skip empty grains (marked as 0) and zero grains (marked as 1) */
         if (sector <= 1) {
             continue;
@@ -1551,6 +1558,17 @@ SparseCheckGrainOrder(DiskInfo *self)
     return areSparseGrainsOrdered(sdi);
 }
 
+static char *
+SparseGetDescriptor(DiskInfo *self)
+{
+    SparseDiskInfo *sdi = getSDI(self);
+    if (!sdi) {
+        return NULL;
+    }
+
+    return sdi->descriptor;
+}
+
 static DiskInfoVMT sparseVMT = {
     .getCapacity = SparseGetCapacity,
     .pread = SparsePread,
@@ -1559,8 +1577,39 @@ static DiskInfoVMT sparseVMT = {
     .close = SparseClose,
     .abort = SparseClose,
     .copyDisk = NULL,
-    .checkGrainOrder = SparseCheckGrainOrder
+    .checkGrainOrder = SparseCheckGrainOrder,
+    .getDescriptor = SparseGetDescriptor
 };
+
+static char *
+getDescriptorFile(int fd, const SparseExtentHeader *hdr)
+{
+    char *descriptor = NULL;
+    size_t descriptorSize;
+
+    if (hdr->descriptorOffset == 0 || hdr->descriptorSize == 0) {
+        fprintf(stderr, "No descriptor found in VMDK file\n");
+        return NULL;
+    }
+
+    descriptorSize = hdr->descriptorSize * VMDK_SECTOR_SIZE;
+    descriptor = malloc(descriptorSize + 1); // +1 for null terminator
+    if (!descriptor) {
+        fprintf(stderr, "Failed to allocate memory for descriptor\n");
+        return NULL;
+    }
+
+    if (!safePread(fd, descriptor, descriptorSize, hdr->descriptorOffset * VMDK_SECTOR_SIZE)) {
+        fprintf(stderr, "Failed to read descriptor from VMDK file\n");
+        free(descriptor);
+        return NULL;
+    }
+
+    // Ensure null termination
+    descriptor[descriptorSize] = '\0';
+
+    return descriptor;
+}
 
 /* Sparse VMDK files optionally have a footer near the end of the file,
    containing the SparseExtentHeader. If present, it overrides the header
@@ -1666,6 +1715,10 @@ Sparse_Open(const char *fileName)
     if (CoalescedPreaderExec(&cp)) {
         goto failDF;
     }
+
+    // Read the descriptor file and store it in the SparseDiskInfo
+    sdi->descriptor = getDescriptorFile(fd, &sdi->diskHdr);
+
     return &sdi->hdr;
 
 failDF:

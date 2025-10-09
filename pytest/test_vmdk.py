@@ -178,3 +178,49 @@ def test_photon_vmdk(setup_test):
     # and check a few expected values
     assert sfdisk_dict['partitiontable']['partitions'][1]['type'] == PHOTON_DISK2_TYPE
     assert sfdisk_dict['partitiontable']['partitions'][1]['uuid'] == PHOTON_DISK2_UUID
+
+
+def test_get_descriptor(setup_test):
+    """Test the --get-descriptor option to extract the descriptor from a VMDK file."""
+    img_name = "random.img"
+    vmdk_name = "descriptor-test.vmdk"
+
+    # First, create a VMDK file
+    process = subprocess.run([VMDK_CONVERT, img_name, vmdk_name], cwd=WORK_DIR)
+    assert process.returncode == 0
+
+    # Run the --get-descriptor option
+    process = subprocess.run(
+        [VMDK_CONVERT, "--get-descriptor", vmdk_name],
+        cwd=WORK_DIR,
+        capture_output=True,
+        text=True
+    )
+    assert process.returncode == 0
+
+    # Verify the descriptor content
+    descriptor = process.stdout
+
+    # Check for expected content in the descriptor
+    assert "# Disk DescriptorFile" in descriptor
+    assert "version=1" in descriptor
+    assert "encoding=\"UTF-8\"" in descriptor
+    assert "createType=\"streamOptimized\"" in descriptor
+    assert "# Extent description" in descriptor
+    assert "RW " in descriptor
+    assert "SPARSE" in descriptor
+    assert "# The Disk Data Base" in descriptor
+    assert "ddb.virtualHWVersion" in descriptor
+    assert "ddb.geometry.cylinders" in descriptor
+    assert "ddb.geometry.heads" in descriptor
+    assert "ddb.geometry.sectors" in descriptor
+
+    # Test error case with non-sparse file
+    process = subprocess.run(
+        [VMDK_CONVERT, "--get-descriptor", img_name],
+        cwd=WORK_DIR,
+        capture_output=True,
+        text=True
+    )
+    assert process.returncode != 0
+    assert "Error: --get-descriptor option only works with sparse VMDK files" in process.stderr

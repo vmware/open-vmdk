@@ -26,6 +26,7 @@
 #include <string.h>
 #include <getopt.h>
 #include <zlib.h>
+#include <ctype.h>
 
 /* toolsVersion in metadata -
    default is 2^31-1 (unknown) */
@@ -63,7 +64,7 @@ copyData(DiskInfo *dst,
         }
         if (dst->vmt->pwrite(dst, buf, readLen, dstOffset) != (ssize_t)readLen) {
             return -1;
-        }        
+        }
         srcOffset += readLen;
         dstOffset += readLen;
     }
@@ -109,10 +110,12 @@ printUsage(char *cmd, int compressionLevel, int numThreads)
 {
     printf("Usage:\n");
     printf("%s -i [--detailed] src.vmdk: displays information for specified virtual disk\n", cmd);
+    printf("%s --get-descriptor src.vmdk: prints the descriptor file content to stdout\n", cmd);
     printf("%s [-c compressionlevel] [-n threads] [-t toolsVersion] [--noreorder] src.vmdk dst.vmdk: converts source disk to destination disk with given tools version\n\n", cmd);
     printf("-c <level> sets the compression level. Valid values are 1 (fastest) to 9 (best). Only when writing to VMDK. Current is %d.\n", compressionLevel);
     printf("-n <threads> sets the number of threads used for compression level. Only when writing to VMDK. Current is (%d).\n", numThreads);
     printf("--detailed shows detailed sparse extent header information (only with -i)\n");
+    printf("--get-descriptor prints the descriptor file content to stdout\n");
     printf("--noreorder disables grain reordering after compression (default: reordering enabled)\n");
 
     return 1;
@@ -139,6 +142,128 @@ isNumber(const char *text)
     return true;
 }
 
+/* Parse the descriptor file and return a JSON string with the key-value pairs */
+static char *
+parseDescriptorFile(const char *descriptor)
+{
+    char *result = NULL;
+    char *line, *saveptr1 = NULL;
+    char *descriptor_copy = NULL;
+    size_t result_size = 0;
+    size_t result_capacity = 1024; // Initial capacity
+    bool first_entry = true;
+
+    if (!descriptor) {
+        return NULL;
+    }
+
+    // Allocate memory for the result
+    result = malloc(result_capacity);
+    if (!result) {
+        return NULL;
+    }
+
+    // Initialize the result string with opening brace
+    strcpy(result, "{}");
+    result_size = 2;
+
+    // Make a copy of the descriptor to avoid modifying the original
+    descriptor_copy = strdup(descriptor);
+    if (!descriptor_copy) {
+        free(result);
+        return NULL;
+    }
+
+    // Parse each line of the descriptor
+    line = strtok_r(descriptor_copy, "\n", &saveptr1);
+    while (line != NULL) {
+        // Skip comments and empty lines
+        if (line[0] != '#' && strlen(line) > 0) {
+            char *key = NULL;
+            char *value = NULL;
+
+            // Find the equals sign
+            char *equals = strchr(line, '=');
+            if (equals) {
+                // Split the line into key and value
+                *equals = '\0';
+                key = line;
+                value = equals + 1;
+
+                // Trim whitespace from key and value
+                while (*key && isspace(*key)) key++;
+                while (*value && isspace(*value)) value++;
+
+                // Remove trailing whitespace from key
+                char *end = key + strlen(key) - 1;
+                while (end > key && isspace(*end)) {
+                    *end = '\0';
+                    end--;
+                }
+
+                // Remove trailing whitespace from value
+                end = value + strlen(value) - 1;
+                while (end > value && isspace(*end)) {
+                    *end = '\0';
+                    end--;
+                }
+
+                // Remove quotes from value if present
+                if (*value == '"' && value[strlen(value) - 1] == '"') {
+                    value[strlen(value) - 1] = '\0';
+                    value++;
+                }
+
+                // Add the key-value pair to the result
+                if (strlen(key) > 0) {
+                    // Calculate the required space for this entry
+                    size_t entry_size = strlen(key) + strlen(value) + 10; // 10 for quotes, colon, comma, etc.
+
+                    // Ensure we have enough space
+                    if (result_size + entry_size > result_capacity) {
+                        result_capacity *= 2;
+                        char *new_result = realloc(result, result_capacity);
+                        if (!new_result) {
+                            free(result);
+                            free(descriptor_copy);
+                            return NULL;
+                        }
+                        result = new_result;
+                    }
+
+                    // Insert before the closing brace
+                    result[result_size - 1] = '\0'; // Remove closing brace
+
+                    // Add comma if not the first entry
+                    if (!first_entry) {
+                        strcat(result, ", ");
+                        result_size += 2;
+                    } else {
+                        first_entry = false;
+                    }
+
+                    // Add the key-value pair
+                    strcat(result, "\"");
+                    strcat(result, key);
+                    strcat(result, "\": \"");
+                    strcat(result, value);
+                    strcat(result, "\"");
+                    strcat(result, "}");
+
+                    // Update result_size
+                    result_size = strlen(result);
+                }
+            }
+        }
+
+        // Get the next line
+        line = strtok_r(NULL, "\n", &saveptr1);
+    }
+
+    free(descriptor_copy);
+    return result;
+}
+
 int
 main(int argc,
      char *argv[])
@@ -151,6 +276,7 @@ main(int argc,
     bool doDetailed = false;
     bool doConvert = false;
     bool doReorder = true;  // Default to true for backward compatibility
+    bool doGetDescriptor = false;
     int compressionLevel = Z_BEST_COMPRESSION;
     int numThreads = get_nprocs();
     const char *env;
@@ -159,6 +285,7 @@ main(int argc,
         {"detailed", no_argument, 0, 'd'},
         {"help", no_argument, 0, 'h'},
         {"noreorder", no_argument, 0, 'r'},
+        {"get-descriptor", no_argument, 0, 'g'},
         {0, 0, 0, 0}
     };
 
@@ -196,6 +323,9 @@ main(int argc,
         case 'd':
             doDetailed = true;
             break;
+        case 'g':
+            doGetDescriptor = true;
+            break;
         case 'n':
             if (!isNumber(optarg)) {
                 fprintf(stderr, "invalid threads value: %s\n", optarg);
@@ -231,7 +361,8 @@ main(int argc,
         exit(1);
     }
 
-    if (doInfo && doConvert) {
+    if ((doInfo && doConvert) || (doInfo && doGetDescriptor) || (doConvert && doGetDescriptor)) {
+        fprintf(stderr, "Error: -i, --get-descriptor and -t options are mutually exclusive\n");
         printUsage(argv[0], compressionLevel, numThreads);
         exit(1);
     }
@@ -257,7 +388,21 @@ main(int argc,
         fprintf(stderr, "Cannot open source disk %s: %s\n", src, strerror(errno));
         exit(1);
     } else {
-        if (doInfo) {
+        if (doGetDescriptor) {
+            // Handle --get-descriptor option
+            if (isSparse && di->vmt->getDescriptor) {
+                char *descriptor = di->vmt->getDescriptor(di);
+                if (descriptor) {
+                    printf("%s", descriptor);
+                } else {
+                    fprintf(stderr, "No descriptor found in VMDK file\n");
+                    exit(1);
+                }
+            } else {
+                fprintf(stderr, "Error: --get-descriptor option only works with sparse VMDK files\n");
+                exit(1);
+            }
+        } else if (doInfo) {
             off_t capacity = di->vmt->getCapacity(di);
             off_t end = 0;
             off_t pos;
@@ -301,6 +446,18 @@ main(int argc,
                     printf("}");
                 } else {
                     printf(", \"error\": \"detailed information only available for sparse VMDK files\"");
+                }
+            }
+
+            // Add parsed descriptor file if available
+            if (doDetailed && isSparse && di->vmt->getDescriptor) {
+                char *descriptor = di->vmt->getDescriptor(di);
+                if (descriptor) {
+                    char *parsed_descriptor = parseDescriptorFile(descriptor);
+                    if (parsed_descriptor) {
+                        printf(", \"descriptorFile\": %s", parsed_descriptor);
+                        free(parsed_descriptor);
+                    }
                 }
             }
 
