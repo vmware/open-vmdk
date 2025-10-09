@@ -76,6 +76,15 @@ def xml_config(key, value):
     return ET.Element('{%s}Config' % NS_VMW, { '{%s}required' % NS_OVF: 'false', '{%s}key' % NS_VMW: key, '{%s}value' % NS_VMW: value})
 
 
+def xml_configs(config):
+    ret = []
+    if config is not None:
+        for k,v in config.items():
+            if v is not None:
+                ret.append(xml_config(k, v))
+    return ret
+
+
 class ValidationError(Exception):
     pass
 
@@ -178,9 +187,7 @@ class RasdItem(VirtualHardware):
         item.append(self.xml_element('Description', self.description))
         item.append(self.xml_element('ElementName', element_name))
 
-        if self.config is not None:
-            for key, val in sorted(self.config.items()):
-                item.append(xml_config(key, val))
+        item.extend(xml_configs(self.config))
 
         if self.connectable:
             item.append(self.xml_element('AutomaticAllocation', "true" if self.connected else "false"))
@@ -466,6 +473,15 @@ class RasdHardDisk(RasdControllerItem):
 
 
     def __init__(self, parent_id, disk, config=None):
+        if config is None or 'virtualDiskFormat' not in config:
+            if disk.sector_size is not None:
+                if config is None:
+                    config = {}
+                try:
+                    config['virtualDiskFormat'] = {512: "native_512", 4096: "native_4k"}[disk.sector_size]
+                except KeyError:
+                    print(f"invalid sector size {disk.sector_size}")
+                    raise
         super().__init__(parent_id, config=config)
         self.disk = disk
 
@@ -587,7 +603,7 @@ class OVFDisk(object):
             'byte * 2^40' : 2 ** 40,
     }
 
-    def __init__(self, path, units=None, disk_id=None, file_id=None, raw_image=None):
+    def __init__(self, path, units=None, disk_id=None, file_id=None, raw_image=None, sector_size=None):
         if disk_id is None:
             self.id = f"vmdisk{OVFDisk.next_id}"
             OVFDisk.next_id += 1
@@ -607,12 +623,17 @@ class OVFDisk(object):
             assert False, "invalid units used"
         self.units = units
 
+        self.sector_size = int(sector_size) if sector_size is not None else None
+
         if raw_image is not None:
             if os.path.exists(raw_image):
                 # check if the vmdk exists, and if it does if it's newer than the raw image
                 # if not, create vmdk from raw image
                 if not os.path.exists(path) or os.path.getctime(raw_image) > os.path.getctime(path):
-                    subprocess.check_call([VMDK_CONVERT, raw_image, path])
+                    command = [VMDK_CONVERT, raw_image, path]
+                    if sector_size is not None:
+                        command += ["--sector-size", str(sector_size)]
+                    subprocess.check_call(command)
             else:
                 print(f"warning: raw image file {raw_image} does not exist, using {path}")
 
@@ -620,6 +641,15 @@ class OVFDisk(object):
         disk_info = OVF._disk_info(path)
         self.capacity = int(disk_info['capacity'] / self.allocation_factors[self.units])
         self.used = disk_info['used']
+
+        if 'descriptorFile' in disk_info and 'ddb.logicalSectorSize' in disk_info['descriptorFile']:
+            sector_size = int(disk_info['descriptorFile']['ddb.logicalSectorSize'])
+            if self.sector_size is not None:
+                assert self.sector_size == sector_size
+            else:
+                self.sector_size = sector_size
+        elif self.sector_size is None:
+            self.sector_size = 512
 
 
     def host_resource(self):
@@ -649,7 +679,7 @@ class OVFEmptyDisk(OVFDisk):
         if units in self.allocation_units_map:
             units = self.allocation_units_map[units]
         self.units = units
-
+        self.sector_size = None
 
     def xml_item(self):
         return ET.Element('{%s}Disk' % NS_OVF, {
@@ -1004,7 +1034,8 @@ class OVF(object):
                                    units=hw.get('units', None),
                                    raw_image=hw.get('raw_image', None),
                                    disk_id=hw.get('disk_id', None),
-                                   file_id=hw.get('file_id', None))
+                                   file_id=hw.get('file_id', None),
+                                   sector_size=hw.get('sector_size', None))
                     disks.append(disk)
                     files.append(disk.file)
                     hw['disk'] = disk
@@ -1086,6 +1117,7 @@ class OVF(object):
                 rasd_items[hw_id] = rasd_item
             except AttributeError:
                 print(f"no class {cl_name}")
+                raise
         return rasd_items
 
 
@@ -1109,7 +1141,7 @@ class OVF(object):
 
     @staticmethod
     def _disk_info(filename):
-        out = subprocess.check_output([VMDK_CONVERT, "-i", filename]).decode("UTF-8")
+        out = subprocess.check_output([VMDK_CONVERT, "-i", "--detailed", filename]).decode("UTF-8")
         return json.loads(out)
 
 
@@ -1180,8 +1212,7 @@ class OVF(object):
         for xcfg in self.extra_configs:
             hw.append(xcfg.xml_item())
 
-        for key, val in sorted(self.hardware_config.items()):
-            hw.append(xml_config(key, val))
+        hw.extend(xml_configs(self.hardware_config))
 
         if self.products:
             for p in self.products:
