@@ -11,7 +11,6 @@
 # conditions of any kind, EITHER EXPRESS OR IMPLIED.  See the License for the
 # specific language governing permissions and limitations under the License.
 
-import glob
 import os
 import pytest
 import shutil
@@ -27,7 +26,7 @@ VMDK_CONVERT=os.path.join(THIS_DIR, "..", "build", "vmdk", "vmdk-convert")
 
 CONFIG_DIR=os.path.join(THIS_DIR, "configs")
 
-WORK_DIR=os.path.join(os.getcwd(), "pytest-configs")
+WORK_DIR=os.path.join(os.getcwd(), "pytest-sectorsize")
 
 
 @pytest.fixture(scope='module', autouse=True)
@@ -67,10 +66,10 @@ def yaml_param(loader, node):
     return value
 
 
-@pytest.mark.parametrize("in_yaml", glob.glob(os.path.join(CONFIG_DIR, "*.yaml")))
-def test_configs(in_yaml):
-    basename = os.path.basename(in_yaml.rsplit(".", 1)[0])
+def test_config():
+    basename = "sector_size"
     out_ovf = os.path.join(WORK_DIR, f"{basename}.ovf")
+    in_yaml = os.path.join(CONFIG_DIR, f"{basename}.yaml")
 
     process = subprocess.run([OVA_COMPOSE, "-i", in_yaml, "-o", out_ovf, "--vmdk-convert", VMDK_CONVERT, "--param", "disk=dummy.vmdk"], cwd=WORK_DIR)
     assert process.returncode == 0
@@ -84,18 +83,41 @@ def test_configs(in_yaml):
     with open(out_ovf) as f:
         ovf = xmltodict.parse(f.read())
 
-    cfg_system = config['system']
-    assert cfg_system['name'] == ovf['Envelope']['VirtualSystem']['Name']
-    assert cfg_system['os_vmw'] == ovf['Envelope']['VirtualSystem']['OperatingSystemSection']['@vmw:osType']
-    assert cfg_system['type'] == ovf['Envelope']['VirtualSystem']['VirtualHardwareSection']['System']['vssd:VirtualSystemType']
+    cfg_hardware_section = config['hardware']
+    cfg_vmw_ovf = ovf['Envelope']['VirtualSystem']['VirtualHardwareSection']['Item']
 
-    vmw_configs = ovf['Envelope']['VirtualSystem']['VirtualHardwareSection']['vmw:Config']
+    disk_map = {
+        'dummydisk': "native_512",                                         # set sector size by default
+        'dummy512disk': "native_512", 'dummy4kdisk': "native_4k",          # get sector size from disk
+        'dummy512disk_set': "native_512", 'dummy4kdisk_set': "native_4k",  # get sector size from yaml
+        'dummydisk_config': "emulated_512",                                # get sector size from config
+        'dummydisk_config_null': None,                                     # unset sector size from config
+        'dummydisk_config_null2': None,                                    # unset sector size from itherwise non-empty config
+    }
+    disk_found = {}
+    for k in disk_map.keys():
+        disk_found[k] = False
 
-    # TODO: check if default is set to bios unless no_default_configs is set
-    if 'firmware' in cfg_system:
-        firmware = None
-        if type(vmw_configs) == list:
-            for vmw_config in vmw_configs:
-                if vmw_config['@vmw:key'] == "firmware":
-                    firmware = vmw_config['@vmw:value']
-        assert cfg_system['firmware'] == firmware
+    for disk_name, v_disk_fmt in disk_map.items():
+        for hw_item in cfg_vmw_ovf:
+            if hw_item['rasd:ElementName'] == disk_name:
+                disk_found[disk_name] = True
+                if v_disk_fmt is not None:
+                    assert 'vmw:Config' in hw_item
+                    config = hw_item['vmw:Config']
+                    if not isinstance(config, list):
+                        config = [config]
+                    for cfg_item in config:
+                        if cfg_item['@vmw:key'] == "virtualDiskFormat":
+                            found = True
+                            assert cfg_item['@vmw:value'] == v_disk_fmt, f"virtualDiskFormat for {disk_name} not expected"
+                else:
+                    if 'vmw:Config' in hw_item:
+                        config = hw_item['vmw:Config']
+                        if not isinstance(config, list):
+                            config = [config]
+                        for cfg_item in config:
+                            assert cfg_item['@vmw:key'] != "virtualDiskFormat", "no 'virtualDiskFormat' expected in 'vmw:Config'"
+
+
+    assert (all(disk_found.values())), f"not all values of {', '.join(disk_found.keys())} were tested - missing in config?"

@@ -106,14 +106,15 @@ failAll:
 
 /* Displays the usage message. */
 static int
-printUsage(char *cmd, int compressionLevel, int numThreads)
+printUsage(char *cmd, int compressionLevel, int numThreads, int sectorSize)
 {
     printf("Usage:\n");
     printf("%s -i [--detailed] src.vmdk: displays information for specified virtual disk\n", cmd);
     printf("%s --get-descriptor src.vmdk: prints the descriptor file content to stdout\n", cmd);
-    printf("%s [-c compressionlevel] [-n threads] [-t toolsVersion] [--noreorder] src.vmdk dst.vmdk: converts source disk to destination disk with given tools version\n\n", cmd);
+    printf("%s [-c compressionlevel] [-n threads] [-t toolsVersion] [--noreorder] [-s size] src.vmdk dst.vmdk: converts source disk to destination disk with given tools version\n\n", cmd);
     printf("-c <level> sets the compression level. Valid values are 1 (fastest) to 9 (best). Only when writing to VMDK. Current is %d.\n", compressionLevel);
-    printf("-n <threads> sets the number of threads used for compression level. Only when writing to VMDK. Current is (%d).\n", numThreads);
+    printf("-n <threads> sets the number of threads used for compression level. Only when writing to VMDK. Current is %d.\n", numThreads);
+    printf("-s, --sector-size <size> sets the sector size which will be written to the descriptor file unless it is 0. Current is %d.\n", sectorSize);
     printf("--detailed shows detailed sparse extent header information (only with -i)\n");
     printf("--get-descriptor prints the descriptor file content to stdout\n");
     printf("--noreorder disables grain reordering after compression (default: reordering enabled)\n");
@@ -279,13 +280,15 @@ main(int argc,
     bool doGetDescriptor = false;
     int compressionLevel = Z_BEST_COMPRESSION;
     int numThreads = get_nprocs();
+    int sectorSize = 0;
     const char *env;
 
     static struct option long_options[] = {
         {"detailed", no_argument, 0, 'd'},
+        {"get-descriptor", no_argument, 0, 'g'},
         {"help", no_argument, 0, 'h'},
         {"noreorder", no_argument, 0, 'r'},
-        {"get-descriptor", no_argument, 0, 'g'},
+        {"sector-size", required_argument, 0, 's'},
         {0, 0, 0, 0}
     };
 
@@ -308,7 +311,7 @@ main(int argc,
         }
     }
 
-    while ((opt = getopt_long(argc, argv, "c:hin:t:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "c:hin:s:t:", long_options, NULL)) != -1) {
         switch (opt) {
         case 'c':
             if (!isNumber(optarg)){
@@ -336,6 +339,13 @@ main(int argc,
         case 'r':
             doReorder = false;
             break;
+        case 's':
+            if (!isNumber(optarg)) {
+                fprintf(stderr, "invalid sector-size value: %s\n", optarg);
+                exit(1);
+            }
+            sectorSize = atoi(optarg);
+            break;
         case 't':
             doConvert = true;
             toolsVersion = optarg;
@@ -346,7 +356,7 @@ main(int argc,
             break;
         case '?':
         case 'h':
-            printUsage(argv[0], compressionLevel, numThreads);
+            printUsage(argv[0], compressionLevel, numThreads, sectorSize);
             exit(1);
         }
     }
@@ -363,7 +373,7 @@ main(int argc,
 
     if ((doInfo && doConvert) || (doInfo && doGetDescriptor) || (doConvert && doGetDescriptor)) {
         fprintf(stderr, "Error: -i, --get-descriptor and -t options are mutually exclusive\n");
-        printUsage(argv[0], compressionLevel, numThreads);
+        printUsage(argv[0], compressionLevel, numThreads, sectorSize);
         exit(1);
     }
 
@@ -475,7 +485,7 @@ main(int argc,
             capacity = di->vmt->getCapacity(di);
 
             if (strcmp(&(filename[strlen(filename) - 5]), ".vmdk") == 0)
-                tgt = StreamOptimized_Create(filename, capacity, compressionLevel, doReorder);
+                tgt = StreamOptimized_Create(filename, capacity, compressionLevel, doReorder, sectorSize);
             else
                 tgt = Flat_Create(filename, capacity);
 

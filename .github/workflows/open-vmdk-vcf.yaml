@@ -114,9 +114,9 @@ jobs:
                   run_id=$(echo "$runs" | head -1 | cut -d' ' -f1)
                   echo "Monitoring workflow run ID: $run_id"
 
-                  # Monitor workflow status (up to 30 minutes)
-                  timeout=1800
-                  interval=60
+                  # Monitor workflow status (up to 1 hour)
+                  timeout=3600
+                  interval=30
                   elapsed=0
 
                   while [ $elapsed -lt $timeout ]; do

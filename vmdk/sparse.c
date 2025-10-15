@@ -68,6 +68,7 @@ typedef struct SparseVmdkWriter {
     char *fileName;
     int compressionLevel;
     bool doReorder;
+    uint32_t sectorSize; /* we can only know for sure when writing, therefore it's here */
 } SparseVmdkWriter;
 
 typedef struct StreamOptimizedDiskInfo {
@@ -222,6 +223,7 @@ setSparseExtentHeader(SparseExtentHeaderOnDisk *dst,
 static char *
 makeDiskDescriptorFile(const char *fileName,
                        uint64_t capacity,
+                       uint32_t sectorSize,
                        uint32_t cid)
 {
     static const char ddfTemplate[] =
@@ -243,21 +245,33 @@ makeDiskDescriptorFile(const char *fileName,
 "ddb.geometry.cylinders = \"%u\"\n"
 "ddb.geometry.heads = \"255\"\n" /* 255/63 is good for anything bigger than 4GB. */
 "ddb.geometry.sectors = \"63\"\n"
+"%s"
 "ddb.adapterType = \"lsilogic\"\n"
 "ddb.toolsInstallType = \"4\"\n" /* unmanaged (open-vm-tools) */
 "ddb.toolsVersion = \"%s\""; /* open-vm-tools version */
 
     unsigned int cylinders;
-    char *ret;
+    char *secEntries = NULL;
+    char *ret = NULL;
 
     if (capacity > 65535 * 255 * 63) {
         cylinders = 65535;
     } else {
         cylinders = CEILING(capacity, 255 * 63);
     }
-    if (asprintf(&ret, ddfTemplate, cid, (long long int)capacity, fileName, (uint32_t)mrand48(), (uint32_t)mrand48(), (uint32_t)mrand48(), cid, cylinders, toolsVersion) == -1) {
+
+    if (sectorSize > 0) {
+        if(asprintf(&secEntries, "ddb.logicalSectorSize = \"%d\"\nddb.physicalSectorSize = \"%d\"\n", sectorSize, sectorSize) == -1)
+            return NULL;
+    }
+
+    if (asprintf(&ret, ddfTemplate, cid, (long long int)capacity, fileName, (uint32_t)mrand48(), (uint32_t)mrand48(), (uint32_t)mrand48(), cid, cylinders, secEntries ? secEntries : "", toolsVersion) == -1) {
         return NULL;
     }
+
+    if (secEntries)
+        free(secEntries);
+
     return ret;
 }
 
@@ -757,7 +771,7 @@ writeGrainTables(int fd, const SparseExtentHeader *hdr, const SparseGTInfo *gtIn
 }
 
 static bool
-writeDescriptor(int fd, const SparseExtentHeader *hdr)
+writeDescriptor(int fd, const SparseExtentHeader *hdr, uint32_t sectorSize)
 {
     uint32_t cid;
     char *descFile;
@@ -767,7 +781,7 @@ writeDescriptor(int fd, const SparseExtentHeader *hdr)
         cid = mrand48();
     } while (cid == 0xFFFFFFFFU || cid == 0xFFFFFFFEU);
 
-    descFile = makeDiskDescriptorFile("disk", hdr->capacity, cid);
+    descFile = makeDiskDescriptorFile("disk", hdr->capacity, sectorSize, cid);
     if (!descFile) {
         fprintf(stderr, "Failed to create descriptor file\n");
         return false;
@@ -1196,7 +1210,7 @@ StreamOptimizedClose(DiskInfo *self)
         fprintf(stderr, "Failed to write grain tables\n");
         goto failAll;
     }
-    if (!writeDescriptor(sodi->writer.fd, &sodi->diskHdr)) {
+    if (!writeDescriptor(sodi->writer.fd, &sodi->diskHdr, sodi->writer.sectorSize)) {
         fprintf(stderr, "Failed to write descriptor\n");
         goto failAll;
     }
@@ -1226,7 +1240,7 @@ static DiskInfoVMT streamOptimizedVMT = {
 };
 
 DiskInfo *
-StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLevel, bool doReorder)
+StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLevel, bool doReorder, int sectorSize)
 {
     StreamOptimizedDiskInfo *sodi;
 
@@ -1256,6 +1270,7 @@ StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLeve
     }
     sodi->writer.compressionLevel = compressionLevel;
     sodi->writer.doReorder = doReorder;
+    sodi->writer.sectorSize = sectorSize;
 
     sodi->diskHdr.descriptorOffset = sodi->diskHdr.overHead;
     sodi->diskHdr.descriptorSize = 20;
