@@ -967,7 +967,8 @@ class OVF(object):
 
 
     def __init__(self,
-                 system, files, disks,
+                 system, hardware_config,
+                 files, disks,
                  networks,
                  vssd_system, rasd_items, extra_configs,
                  products, annotation, eula,
@@ -975,6 +976,10 @@ class OVF(object):
         self.hardware_config = {}
         if not system.get('no_default_configs', False):
             self.hardware_config.update(OVF.CONFIG_DEFAULTS)
+
+        if hardware_config:
+            self.hardware_config.update(hardware_config)
+
         self.name = system['name']
         self.os_cim = system.get('os_cim', 100)
         self.os_vmw = system.get('os_vmw', "other4xLinux64Guest")
@@ -1015,6 +1020,7 @@ class OVF(object):
         product = None
         annotation = None
         eula = None
+        hardware_config = {}
 
         assert 'hardware' in config, "config needs a 'hardware' section"
 
@@ -1044,6 +1050,8 @@ class OVF(object):
                                         disk_id=hw.get('disk_id', None))
                     disks.append(disk)
                     hw['disk'] = disk
+
+        hardware_config = hardware.get('config', {})
 
         networks = {}
         if 'networks' in config:
@@ -1089,7 +1097,7 @@ class OVF(object):
             for k, v in config['configurations'].items():
                 configurations[k] = OVFConfiguration(k, **v)
 
-        ovf = cls(config['system'], files, disks,
+        ovf = cls(config['system'], hardware_config, files, disks,
                   networks, vssd_system, rasd_items, extra_configs,
                   products, annotation, eula,
                   configurations)
@@ -1102,7 +1110,9 @@ class OVF(object):
         rasd_items = {}
         hardware = config['hardware']
         for hw_id, hw_config in hardware.items():
-            if hw_id == 'memory':
+            if hw_id == 'config':
+                continue
+            elif hw_id == 'memory':
                 cl_name = "RasdMemory"
             elif hw_id == 'cpus':
                 cl_name = "RasdCpus"

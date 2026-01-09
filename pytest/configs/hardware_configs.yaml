@@ -1,0 +1,37 @@
+system:
+    name: minimal
+    type: vmx-14 vmx-20
+    os_vmw: vmwarePhoton64Guest
+
+networks:
+    vm_network:
+        name: "None"
+        description: "The None network"
+
+hardware:
+    config:
+        bootOptions.bootRetryEnabled: true
+    cpus: 2
+    memory:
+        type: memory
+        size: 4096
+    sata1:
+        type: sata_controller
+    cdrom1:
+        type: cd_drive
+        parent: sata1
+    rootdisk:
+        type: hard_disk
+        parent: sata1
+        disk_image: dummy.vmdk
+    usb1:
+        type: usb_controller
+    ethernet1:
+        type: ethernet
+        subtype: VmxNet3
+        network: vm_network
+    videocard1:
+        type: video_card
+    vmci1:
+        type: vmci
+

@@ -147,42 +147,50 @@ class TestAllConfigs:
     def test_virtual_hardware_configs(self):
         #Hardware Section
 
+        def test_config(cfg_config, ovf_configs):
+            if ovf_configs is not None:
+                if not isinstance(ovf_configs, list):
+                    ovf_configs = [ovf_configs]
+                for key, value in cfg_config.items():
+                    found_key = False
+                    for ovf_cfg in ovf_configs:
+                        if ovf_cfg['@vmw:key'] == key:
+                            found_key = True
+                            self.assert_values(value, ovf_cfg['@vmw:value'], msg=f"value {ovf_cfg['@vmw:value']} for key {key} does not match expected {value}")
+                            break
+
+                    # if value is None, we don't want to find it (it's intended to remove that entry)
+                    assert found_key == (value is not None), f"key {key} not found on 'vmw:Config'" if not found_key else f"key {key} found in 'vmw:Config', but it's not expected because value is None"
+            else:
+                # if there is no 'vmw:Config', but we do have 'config', it must be because all values are None
+                for key, value in cfg_config.items():
+                    assert value is None
+
+
         cfg_hardware_section = self.config['hardware']
         cfg_vmw_ovf = self.ovf['Envelope']['VirtualSystem']['VirtualHardwareSection']['Item']
 
-        for idx, key in enumerate(cfg_hardware_section):
-            self.assert_values(key, cfg_vmw_ovf[idx]['rasd:ElementName'])
-
-            if key in ["cpus", "memory"]:
-                if isinstance(cfg_hardware_section[key], int):
-                    self.assert_values(cfg_hardware_section[key], int(cfg_vmw_ovf[idx]['rasd:VirtualQuantity']))
-                else:
-                    self.assert_values(cfg_hardware_section[key]['size'], int(cfg_vmw_ovf[idx]['rasd:VirtualQuantity']))
+        for key, hw_item_cfg in cfg_hardware_section.items():
+            if key == 'config':
+                test_config(hw_item_cfg, self.ovf['Envelope']['VirtualSystem']['VirtualHardwareSection']['vmw:Config'])
             else:
-                self.assert_values(cfg_hardware_section[key].get('subtype'), cfg_vmw_ovf[idx].get('rasd:ResourceSubType'))
-                self.assert_values(cfg_hardware_section[key].get('connected'), cfg_vmw_ovf[idx].get('rasd:AutomaticAllocation'))
-
-            if isinstance(cfg_hardware_section[key], dict) and cfg_hardware_section[key].get('config') is not None:
-                cfg_config = cfg_hardware_section[key]['config']
-                ovf_configs = cfg_vmw_ovf[idx].get('vmw:Config')
-
-                if ovf_configs is not None:
-                    if not isinstance(ovf_configs, list):
-                        ovf_configs = [ovf_configs]
-                    for key, value in cfg_config.items():
-                        found_key = False
-                        for ovf_cfg in ovf_configs:
-                            if ovf_cfg['@vmw:key'] == key:
-                                found_key = True
-                                self.assert_values(value, ovf_cfg['@vmw:value'], msg=f"value {ovf_cfg['@vmw:value']} for key {key} does not match expected {value}")
-                                break
-
-                        # if value is None, we don't want to find it (it's intended to remove that entry)
-                        assert found_key == (value is not None), f"key {key} not found on 'vmw:Config'" if not found_key else f"key {key} found in 'vmw:Config', but it's not expected because value is None"
+                for hw_item_ovf in self.ovf['Envelope']['VirtualSystem']['VirtualHardwareSection']['Item']:
+                    if hw_item_ovf['rasd:ElementName'] == key:
+                        break
                 else:
-                    # if there is no 'vmw:Config', but we do have 'config', it must be because all values are None
-                    for key, value in cfg_config.items():
-                        assert value is None
+                    hw_item_ovf = None
+
+                if key in ["cpus", "memory"]:
+                    if isinstance(hw_item_cfg, int):
+                        self.assert_values(hw_item_cfg, int(hw_item_ovf['rasd:VirtualQuantity']))
+                    else:
+                        self.assert_values(hw_item_cfg['size'], int(hw_item_ovf['rasd:VirtualQuantity']))
+                else:
+                    self.assert_values(hw_item_cfg.get('subtype'), hw_item_ovf.get('rasd:ResourceSubType'))
+                    self.assert_values(hw_item_cfg.get('connected'), hw_item_ovf.get('rasd:AutomaticAllocation'))
+
+                if isinstance(hw_item_cfg, dict) and hw_item_cfg.get('config') is not None:
+                    test_config(hw_item_cfg['config'], hw_item_ovf.get('vmw:Config'))
 
 
     def test_configuration_configs(self):
