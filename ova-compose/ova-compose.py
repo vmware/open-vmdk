@@ -1316,6 +1316,19 @@ class OVF(object):
                 assert do_copy, f"no certificate found in {keyfile}"
 
 
+    def sign_manifest_external(self, script_format, keyfile, ovf_file=None, mf_file=None, sign_alg="sha512"):
+        if ovf_file == None:
+            ovf_file = f"{self.name}.ovf"
+        if mf_file == None:
+            mf_file = f"{self.name}.mf"
+        cert_file = os.path.splitext(ovf_file)[0] + ".cert"
+
+        script = script_format.format(ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg, cert_file=cert_file, keyfile=keyfile)
+        subprocess.check_call(script, shell=True)
+        assert os.path.isfile(cert_file), f"certificate file {cert_file} not created"
+        assert os.path.getsize(cert_file) > 0, f"certificate file {cert_file} is empty"
+
+
 def usage():
     print(f"Usage: {sys.argv[0]} -i|--input-file <input file> -o|--output-file <output file> [--format ova|ovf|dir] [-q] [-h]")
     print("")
@@ -1367,12 +1380,13 @@ def main():
     checksum_type = "sha256"
     sign_keyfile = None
     sign_alg = None
+    sign_script = None
     tar_format = "gnu"
 
     try:
         opts, args = getopt.getopt(sys.argv[1:],
             'f:hi:mo:q',
-            longopts=['format=', 'input-file=', 'manifest', 'output-file=', 'param=', 'checksum-type=', 'sign=', 'sign-alg=', 'tar-format=', 'vmdk-convert='])
+            longopts=['format=', 'input-file=', 'manifest', 'output-file=', 'param=', 'checksum-type=', 'sign=', 'sign-alg=', 'sign-script=', 'tar-format=', 'vmdk-convert='])
     except:
         print ("invalid option")
         sys.exit(2)
@@ -1402,6 +1416,8 @@ def main():
             sign_keyfile = a
         elif o in ['--sign-alg']:
             sign_alg = a
+        elif o in ['--sign-script']:
+            sign_script = a
         elif o in ['-h']:
             usage()
             sys.exit(0)
@@ -1457,8 +1473,11 @@ def main():
         ovf.write_xml(ovf_file=ovf_file)
         if do_manifest:
             ovf.write_manifest(ovf_file=ovf_file, mf_file=mf_file, hash_type=checksum_type)
-            if sign_keyfile is not None:
-                ovf.sign_manifest(sign_keyfile, ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg)
+            if sign_keyfile is not None or sign_script is not None:
+                if sign_script is None:
+                    ovf.sign_manifest(sign_keyfile, ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg)
+                else:
+                    ovf.sign_manifest_external(sign_script, sign_keyfile, ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg)
     elif output_format == "ova" or output_format == "dir":
         pwd = os.getcwd()
         tmpdir = tempfile.mkdtemp(prefix=f"{basename}-", dir=pwd)
@@ -1474,8 +1493,11 @@ def main():
                 all_files.append(dst)
 
             ovf.write_manifest(ovf_file=ovf_file, mf_file=mf_file, hash_type=checksum_type)
-            if sign_keyfile is not None:
-                ovf.sign_manifest(sign_keyfile, ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg)
+            if sign_keyfile is not None or sign_script is not None:
+                if sign_script is None:
+                    ovf.sign_manifest(sign_keyfile, ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg)
+                else:
+                    ovf.sign_manifest_external(sign_script, sign_keyfile, ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg)
                 cert_file = os.path.splitext(ovf_file)[0] + ".cert"
                 all_files.append(cert_file)
 
