@@ -24,7 +24,7 @@ PREFIX ?= /usr
 
 CC := gcc
 CFLAGS := -W -Wall -O2 -g $(CFLAGS)
-LDFLAGS := -g -lz $(LDFLAGS)
+LDFLAGS := -g -lz -pthread $(LDFLAGS)
 LDFLAGS_FUSE := $(LDFLAGS) $$(pkg-config fuse3 --libs)
 
 OBJS := $(addprefix $(OUTPUTDIR)/, $(SRC:%.c=%.o))
