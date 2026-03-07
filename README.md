@@ -26,6 +26,9 @@ The OVF/OVA specification can be found at https://www.dmtf.org/standards/ovf
 # Getting Started
 
 ## Installation
+Building requires the zlib development files. In Ubuntu or Debian, install `zlib1g-dev` with `apt`.
+In RHEL like distributions (Fedora, Rocky Linux, CentOS), install `zlib-devel`.
+
 Clone the repository, like `git clone https://github.com/vmware/open-vmdk`.
 
 Alternatively, download and extract it:
