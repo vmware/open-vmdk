@@ -22,6 +22,9 @@ hardware:
     scsi1:
         type: scsi_controller
         subtype: lsilogic
+    scsi2:
+        type: scsi_controller
+        subtype: virtualscsi
     sata1:
         type: sata_controller
     cdrom1:

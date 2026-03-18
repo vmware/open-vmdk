@@ -186,7 +186,10 @@ class TestAllConfigs:
                     else:
                         self.assert_values(hw_item_cfg['size'], int(hw_item_ovf['rasd:VirtualQuantity']))
                 else:
-                    self.assert_values(hw_item_cfg.get('subtype'), hw_item_ovf.get('rasd:ResourceSubType'))
+                    subtype = hw_item_cfg.get('subtype')
+                    if subtype is not None and subtype.lower() == "virtualscsi":
+                        subtype = "VirtualSCSI"
+                    self.assert_values(subtype, hw_item_ovf.get('rasd:ResourceSubType'))
                     self.assert_values(hw_item_cfg.get('connected'), hw_item_ovf.get('rasd:AutomaticAllocation'))
 
                 if isinstance(hw_item_cfg, dict) and hw_item_cfg.get('config') is not None:
