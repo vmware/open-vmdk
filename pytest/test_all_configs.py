@@ -141,7 +141,7 @@ class TestAllConfigs:
 
         for vmw_config in vmw_configs:
             if vmw_config['@vmw:key'] == "firmware":
-                self.assert_values(cfg_system_section.get('firmware', "bios"), vmw_config['@vmw:value'])
+                self.assert_values(cfg_system_section.get('firmware', "efi"), vmw_config['@vmw:value'])
 
 
     def test_virtual_hardware_configs(self):

@@ -945,7 +945,7 @@ class OVF(object):
         "cpuHotAddEnabled": "false",
         "cpuHotRemoveEnabled": "false",
         "memoryHotAddEnabled": "false",
-        "firmware": "bios",
+        "firmware": "efi",
         "tools.syncTimeWithHost": "false",
         "tools.afterPowerOn": "true",
         "tools.afterResume": "true",
@@ -960,7 +960,7 @@ class OVF(object):
         "virtualSMCPresent": "false",
         "flags.vvtdEnabled": "false",
         "flags.vbsEnabled": "false",
-        "bootOptions.efiSecureBootEnabled": "false",
+        "bootOptions.efiSecureBootEnabled": "true",
         "powerOpInfo.standbyAction": "checkpoint"
     }
 
@@ -985,13 +985,12 @@ class OVF(object):
         if 'os_name' in system:
             self.os_name = system['os_name']
         if 'firmware' in system:
-            if system['firmware'] not in ['bios','efi']:
+            if system.get('firmware', "efi") not in ['bios', 'efi']:
                 raise ValidationError("os.firmware must be 'bios' or 'efi'")
-            self.hardware_config['firmware'] = system['firmware']
-        if 'secure_boot' in system:
-            if type(system['secure_boot']) is not bool:
-                raise ValidationError("os.secure_boot must be boolean")
-            self.hardware_config['bootOptions.efiSecureBootEnabled'] = "true" if system['secure_boot'] else "false"
+            self.hardware_config['firmware'] = system.get('firmware', "efi")
+        if type(system.get('secure_boot', True)) is not bool:
+            raise ValidationError("os.secure_boot must be boolean")
+        self.hardware_config['bootOptions.efiSecureBootEnabled'] = "true" if system.get('secure_boot', True) else "false"
         self.files = files
         self.disks = disks
         self.networks = networks
