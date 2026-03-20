@@ -278,8 +278,12 @@ class RasdScsiController(RasdController):
         # TODO: maintain valid settings in a structure instead of code:
         if self.subtype is None:
             self.subtype = 'VirtualSCSI'
-        elif self.subtype.lower() in ['virtualscsi', 'lsilogic']:
-            self.subtype = subtype
+        elif self.subtype.lower() in ['buslogic', 'lsilogic', 'lsilogicas', 'virtualscsi']:
+            # all subtypes must be lower case except VirtualSCSI, but we accept any case
+            if subtype.lower() == "virtualscsi":
+                self.subtype = "VirtualSCSI"
+            else:
+                self.subtype = subtype.lower()
         else:
             raise Exception(f"invalid SCSI subtype '{self.subtype}'")
 
