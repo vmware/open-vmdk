@@ -168,7 +168,7 @@ jobs:
               run: |
                   set -e
                   make
-                  pytest-3 pytest/
+                  pytest pytest/
 
     poi-harness:
         runs-on:
