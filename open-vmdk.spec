@@ -6,7 +6,7 @@ Version:       0.3.14
 Release:       0%{?dist}
 Vendor:        VMware, Inc.
 Distribution:  Photon
-License:       Apache License 2.0
+License:       Apache License 2.0 and Proprietary
 URL:           https://github.com/vmware/open-vmdk
 Group:         Development/Tools
 
@@ -63,6 +63,7 @@ fi
 
 %files
 %defattr(-,root,root)
+%doc README.md LICENSE NOTICE vmdk_50_technote.pdf
 %config(noreplace) %{_sysconfdir}/%{name}.conf
 %{_bindir}/mkova.sh
 %{_bindir}/ova-compose
