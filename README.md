@@ -19,9 +19,11 @@ There is also the legacy tool `mkova.sh` that generates OVF files from templates
 
 ## Specifications
 
-The VMDK format specification can be downloaded at https://www.vmware.com/app/vmdk/?src=vmdk (pdf).
+[VMDK format specification](vmdk_50_technote.pdf) (pdf)
 
-The OVF/OVA specification can be found at https://www.dmtf.org/standards/ovf
+[The OVF/OVA specification](https://www.dmtf.org/standards/ovf)
+
+[Open Virtualization Format Specification](https://www.dmtf.org/sites/default/files/standards/documents/DSP0243_2.1.1.pdf) (pdf)
 
 # Getting Started
 
