@@ -218,7 +218,7 @@ The config file has 3 mandatory and 4 optional sections. `system`, `networks` an
 
 These sections are optional:
 * `product` describes the product. It has the fields `info`, `product`, `vendor`, `version` and `full_version`.
-* `configurations` describes different OVF configurations that can be selected at deployment time. It is a map with the configuration id as key, and the fields `label`, `description` and optionally `default`: 
+* `configurations` describes different OVF configurations that can be selected at deployment time. It is a map with the configuration id as key, and the fields `label`, `description` and optionally `default`:
 ```
 configurations:
     tall:
@@ -350,3 +350,9 @@ When `mkova.sh` completes, you should see the final OVA under the current direct
 `mkova.sh` will look for a configuration file at `/etc/open-vmdk.conf`.
 This is a simple shell script that can be used to set default values.
 
+# License
+
+This project is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.
+
+**Exception:**
+The file `vmdk_50_technote.pdf` is copyrighted by Broadcom and is distributed under a separate proprietary license. See the [NOTICE](NOTICE) file for more information.
