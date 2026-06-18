@@ -1,0 +1,5 @@
+open-vmdk (0.3.13-0) unstable; urgency=medium
+
+  * Initial Debian packaging
+
+ -- Oliver Kurth <oliver.kurth@broadcom.com>  Tue, 09 Sep 2025 12:00:00 +0000
