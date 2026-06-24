@@ -13,6 +13,7 @@ Group:         Development/Tools
 Source0:       https://github.com/vmware/open-vmdk/archive/refs/tags/v%{version}.tar.gz
 
 BuildRequires: zlib-devel
+BuildRequires: fuse3-devel
 
 Requires: coreutils
 Requires: grep
@@ -41,14 +42,24 @@ Show the value of an OVF property, whether the properties
 were presented to this VM in guestinfo or on a cdrom.
 Optionally, allows a property value to be modified.
 
+%package -n vmdk-fuse
+Summary:       FUSE driver to mount VMDK files
+Group:         Development/Tools
+Requires:      fuse3
+
+%description -n vmdk-fuse
+FUSE driver to mount VMDK files.
+
 %prep
 %autosetup
 
 %build
 %make_build
+%make_build fuse
 
 %install
 %make_install
+%make_install install-fuse
 install -d -m 755 %{buildroot}%{_datadir}/%{name}
 install templates/*.ovf %{buildroot}%{_datadir}/%{name}
 install -d -m 755 %{buildroot}%{_sharedstatedir}/ovfenv
@@ -74,6 +85,10 @@ fi
 %defattr(-,root,root)
 %{_bindir}/ovfenv
 %dir %{_sharedstatedir}/ovfenv
+
+%files -n vmdk-fuse
+%defattr(-,root,root)
+%{_bindir}/vmdk-fuse
 
 %changelog
 * Wed Jan 21 2026 Oliver Kurth <oliver.kurth@broadcom.com> 0.3.14-0
