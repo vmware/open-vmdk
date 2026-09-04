@@ -261,6 +261,48 @@ jobs:
                       cd ${HOME}/artifacts/open-vmdk/ && rm -f master && ln -fs ${GITHUB_SHA::7} ./master
                   fi
 
+    update-cayman-poi-master:
+        runs-on: self-hosted
+        needs:
+            - cayman_poi
+            - poi-harness
+        if: github.ref_name == 'master'
+        steps:
+            - name: Checkout Cayman POI
+              uses: actions/checkout@v3
+              with:
+                  repository: vcf/cayman-poi
+                  ref: vmware-master
+                  path: ./cayman-poi
+                  submodules: "true"
+                  fetch-depth: 0
+                  ssh-key: ${{ secrets.POI_CICD_SSH_KEY }}
+                  ssh-strict: "false"
+
+            - name: update poi/open-vmdk and push to vmware-master
+              run: |
+                  cd ./cayman-poi
+                  git config --global user.email "poi-cd@broadcom.com"
+                  git config --global user.name "POI CI/CD"
+
+                  pushd poi/open-vmdk
+
+                  # sometimes the sha is not available yet
+                  git fetch
+
+                  git checkout ${GITHUB_SHA::7}
+                  popd
+
+                  git add poi/open-vmdk
+
+                  # Only commit if there are changes
+                  if git diff --cached --quiet; then
+                      echo "No changes to commit, skipping commit step"
+                  else
+                      git commit -m "update poi/open-vmdk to ${GITHUB_SHA::7}"
+                      git push origin vmware-master
+                  fi
+
     github-public:
         runs-on: self-hosted
         needs:
