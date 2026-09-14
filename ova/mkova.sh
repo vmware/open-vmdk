@@ -129,7 +129,7 @@ done
 next_id=$((max_id+1))
 
 # Get vmdk parent id
-disk_parent_id=`sed -n '/Hard Disk 1/,+3p' $ovftempl | grep Parent | sed 's/[^0-9]*//g'`
+disk_parent_id=`sed -n '/Hard [Dd]isk 1/,+3p' $ovftempl | grep Parent | sed 's/[^0-9]*//g'`
 
 TMPDIR=$(mktemp -p . -d XXXXXXXX)
 
