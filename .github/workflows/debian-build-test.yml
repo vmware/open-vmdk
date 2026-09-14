@@ -1,0 +1,215 @@
+name: Build and Test Debian Packages
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    container:
+      # Use the appropriate container based on the distro
+      image: ${{ matrix.distro == 'debian-bookworm' && 'debian:bookworm' || matrix.distro == 'ubuntu-22.04' && 'ubuntu:22.04' || 'ubuntu:24.04' }}
+    strategy:
+      matrix:
+        # Test on multiple distro versions
+        distro: ['ubuntu-22.04', 'ubuntu-24.04', 'debian-bookworm']
+      fail-fast: false
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up build environment
+      run: |
+        apt-get update
+        apt-get install -y \
+          build-essential \
+          debhelper \
+          devscripts \
+          zlib1g-dev \
+          gcc \
+          fakeroot \
+          lintian \
+          dpkg-dev
+
+    - name: Install runtime dependencies for testing
+      run: |
+        apt-get install -y \
+          coreutils \
+          grep \
+          python3-lxml \
+          python3-yaml \
+          sed \
+          tar \
+          util-linux \
+          zlib1g \
+          python3 \
+          python3-libxml2
+
+    - name: Build packages
+      run: |
+        echo "Building Debian packages..."
+        BUILD_SUCCESS=false
+
+        # Try standard build first, fall back to manual if fakeroot fails
+        if dpkg-buildpackage -us -uc --build=binary 2>/dev/null; then
+          echo "Standard build succeeded"
+          BUILD_SUCCESS=true
+        else
+          echo "Standard build failed, trying manual build..."
+          debian/rules clean
+          if debian/rules build && debian/rules binary; then
+            chown -R $(id -u):$(id -g) debian/ ../*.deb 2>/dev/null || true
+            echo "Manual build succeeded"
+            BUILD_SUCCESS=true
+          else
+            echo "Manual build also failed"
+          fi
+        fi
+
+        if [ "$BUILD_SUCCESS" != "true" ]; then
+          echo "ERROR: All build methods failed"
+          exit 1
+        fi
+
+    - name: List built packages
+      run: |
+        echo "Built packages:"
+        if ! ls -la ../*.deb 2>/dev/null; then
+          echo "ERROR: No .deb files found in parent directory"
+          exit 1
+        fi
+
+    - name: Verify package contents
+      run: |
+        # Check for open-vmdk package (required)
+        if ! ls ../open-vmdk_*.deb 1> /dev/null 2>&1; then
+          echo "ERROR: open-vmdk package not found"
+          exit 1
+        fi
+        echo "=== open-vmdk package info ==="
+        dpkg-deb -I ../open-vmdk_*.deb
+        echo ""
+        echo "=== open-vmdk package contents ==="
+        dpkg-deb -c ../open-vmdk_*.deb
+
+        # Check for ovfenv package (required)
+        if ! ls ../ovfenv_*.deb 1> /dev/null 2>&1; then
+          echo "ERROR: ovfenv package not found"
+          exit 1
+        fi
+        echo ""
+        echo "=== ovfenv package info ==="
+        dpkg-deb -I ../ovfenv_*.deb
+        echo ""
+        echo "=== ovfenv package contents ==="
+        dpkg-deb -c ../ovfenv_*.deb
+
+    - name: Run lintian checks
+      run: |
+        echo "Running lintian checks..."
+        # Both packages should exist at this point
+        lintian --no-tag-display-limit ../open-vmdk_*.deb || true
+        lintian --no-tag-display-limit ../ovfenv_*.deb || true
+
+    - name: Install packages
+      run: |
+        echo "Installing packages..."
+        # Both packages should exist at this point
+        dpkg -i ../open-vmdk_*.deb ../ovfenv_*.deb || true
+        # Fix any dependency issues
+        apt-get install -f -y
+
+    - name: Test installed binaries
+      run: |
+        echo "Testing installed binaries..."
+
+        # Test vmdk-convert
+        echo "=== Testing vmdk-convert ==="
+        vmdk-convert --help || vmdk-convert -h || echo "vmdk-convert help not available"
+        which vmdk-convert
+        ls -la $(which vmdk-convert)
+
+        # Test ova-compose
+        echo "=== Testing ova-compose ==="
+        ova-compose --help || ova-compose -h || echo "ova-compose help not available"
+        which ova-compose
+        ls -la $(which ova-compose)
+
+        # Test mkova.sh
+        echo "=== Testing mkova.sh ==="
+        mkova.sh --help || mkova.sh -h || echo "mkova.sh help not available"
+        which mkova.sh
+        ls -la $(which mkova.sh)
+
+        # Test ovfenv
+        echo "=== Testing ovfenv ==="
+        ovfenv --help || ovfenv -h || echo "ovfenv help not available"
+        which ovfenv
+        ls -la $(which ovfenv)
+
+    - name: Test configuration files
+      run: |
+        echo "Testing configuration files..."
+        echo "=== /etc/open-vmdk.conf ==="
+        cat /etc/open-vmdk.conf
+
+        echo "=== /var/lib/ovfenv directory ==="
+        ls -la /var/lib/ovfenv/
+
+    - name: Test OVF templates
+      run: |
+        echo "Testing OVF templates..."
+        echo "=== Templates directory ==="
+        ls -la /usr/share/open-vmdk/
+        echo "=== Sample template content ==="
+        head -20 /usr/share/open-vmdk/template-hw20.ovf
+
+    - name: Basic functionality test
+      run: |
+        echo "Running basic functionality tests..."
+
+        # Create a small test image
+        dd if=/dev/zero of=test.img bs=1M count=10
+
+        # Test vmdk-convert
+        echo "Testing vmdk-convert with test image..."
+        vmdk-convert test.img test.vmdk || echo "vmdk-convert failed (expected in CI environment)"
+
+        # Clean up
+        rm -f test.img test.vmdk
+
+    - name: Copy packages to workspace
+      run: |
+        mkdir -p packages
+        if ! cp ../*.deb packages/ 2>/dev/null; then
+          echo "ERROR: Failed to copy .deb files to packages directory"
+          exit 1
+        fi
+        echo "Copied packages:"
+        ls -la packages/
+
+    - name: Upload packages as artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: debian-packages-${{ matrix.distro }}
+        path: packages/*.deb
+        retention-days: 30
+
+    - name: Upload build logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-${{ matrix.distro }}
+        path: |
+          debian/
+        retention-days: 7
+

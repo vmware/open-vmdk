@@ -1,0 +1,27 @@
+Source: open-vmdk
+Section: devel
+Priority: optional
+Maintainer: Oliver Kurth <oliver.kurth@broadcom.com>
+Build-Depends: debhelper (>= 10), zlib1g-dev, gcc
+Standards-Version: 4.5.0
+Homepage: https://github.com/vmware/open-vmdk
+Vcs-Git: https://github.com/vmware/open-vmdk.git
+Vcs-Browser: https://github.com/vmware/open-vmdk
+
+Package: open-vmdk
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, coreutils, grep, python3-lxml, python3-yaml, sed, tar, util-linux, zlib1g
+Description: Tools to create OVA files from raw disk images
+ Tools to create OVA files from raw disk images. This includes 'vmdk-convert'
+ to create VMDKs from raw disk images, and 'ova-compose' to create OVA files
+ that can be imported by VMware vSphere or Fusion and Workstation.
+
+Package: ovfenv
+Architecture: all
+Depends: ${misc:Depends}, open-vm-tools, python3, python3-libxml2
+Description: Tools to get or set OVF environment variables
+ Show the value of an OVF property, whether the properties
+ were presented to this VM in guestinfo or on a cdrom.
+ Optionally, allows a property value to be modified.
+
+

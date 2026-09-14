@@ -1,0 +1,5 @@
+usr/bin/vmdk-convert
+usr/bin/mkova.sh
+usr/bin/ova-compose
+usr/share/open-vmdk/*
+etc/open-vmdk.conf
