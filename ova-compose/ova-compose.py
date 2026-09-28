@@ -30,6 +30,9 @@ APP_NAME = "ova-compose"
 
 VMDK_CONVERT = "vmdk-convert"
 
+# DER encoding of OID 1.2.840.113549.1.7.2 (id-signedData)
+CMS_SIGNED_DATA_OID = bytes.fromhex("06092a864886f70d010702")
+
 NS_CIM = "http://schemas.dmtf.org/wbem/wscim/1/common"
 NS_OVF = "http://schemas.dmtf.org/ovf/envelope/1"
 NS_RASD = "http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_ResourceAllocationSettingData"
@@ -1319,17 +1322,48 @@ class OVF(object):
                 assert do_copy, f"no certificate found in {keyfile}"
 
 
-    def sign_manifest_external(self, script_format, keyfile, ovf_file=None, mf_file=None, sign_alg="sha512"):
+    @staticmethod
+    def _check_p7s(p7s_file):
+        # sanity check only, the signature itself is not verified:
+        # must be a DER SEQUENCE containing the signedData OID
+        with open(p7s_file, "rb") as f:
+            data = f.read()
+        assert data[:1] == b"\x30", f"signature file {p7s_file} is not DER encoded"
+        assert CMS_SIGNED_DATA_OID in data[:64], f"signature file {p7s_file} is not a CMS SignedData"
+
+
+    def sign_manifest_external(self, keyfile, script_format, ovf_file=None, mf_file=None, sign_alg="sha512", sign_format="cert"):
         if ovf_file == None:
             ovf_file = f"{self.name}.ovf"
         if mf_file == None:
             mf_file = f"{self.name}.mf"
         cert_file = os.path.splitext(ovf_file)[0] + ".cert"
+        p7s_file = os.path.splitext(ovf_file)[0] + ".p7s"
 
-        script = script_format.format(ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg, cert_file=cert_file, keyfile=keyfile)
+        script = script_format.format(ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg, cert_file=cert_file, p7s_file=p7s_file, keyfile=keyfile)
         subprocess.check_call(script, shell=True)
-        assert os.path.isfile(cert_file), f"certificate file {cert_file} not created"
-        assert os.path.getsize(cert_file) > 0, f"certificate file {cert_file} is empty"
+
+        sign_files = []
+        if sign_format in ["cert", "both"]:
+            assert os.path.isfile(cert_file), f"certificate file {cert_file} not created"
+            assert os.path.getsize(cert_file) > 0, f"certificate file {cert_file} is empty"
+            sign_files.append(cert_file)
+        if sign_format in ["p7s", "both"]:
+            assert os.path.isfile(p7s_file), f"signature file {p7s_file} not created"
+            assert os.path.getsize(p7s_file) > 0, f"signature file {p7s_file} is empty"
+            OVF._check_p7s(p7s_file)
+            sign_files.append(p7s_file)
+        return sign_files
+
+
+    def sign_package(self, keyfile, script_format, ovf_file=None, mf_file=None, sign_alg="sha512", sign_format="cert"):
+        if ovf_file == None:
+            ovf_file = f"{self.name}.ovf"
+        if script_format is None:
+            self.sign_manifest(keyfile, ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg)
+            return [os.path.splitext(ovf_file)[0] + ".cert"]
+        return self.sign_manifest_external(keyfile, script_format, ovf_file=ovf_file, mf_file=mf_file,
+                                           sign_alg=sign_alg, sign_format=sign_format)
 
 
 def usage():
@@ -1344,6 +1378,7 @@ def usage():
     print("  --sign <keyfile>            sign the manifest file with the given keyfile (implies -m)")
     print("  --sign-alg sha1|sha256|sha512  set the signature algorithm for the manifest. Must be sha1, sha256 or sha512. Default is the same as the checksum-type.")
     print("  --sign-script <script>      sign the manifest file with the given script (implies -m)")
+    print("  --sign-format cert|p7s|both  set the signature file format. Must be cert, p7s or both. Default is cert. p7s and both require --sign-script.")
     print("  --tar-format gnu|posix      set the tar format for the ova file. Must be gnu or posix. Default is gnu.")
     print("  --vmdk-convert <path>       set the path to the vmdk-convert tool (optional)")
     print("  -q                          quiet mode")
@@ -1366,10 +1401,16 @@ def usage():
     print("    - {mf_file}: the path to the manifest file")
     print("    - {sign_alg}: the signature algorithm")
     print("    - {cert_file}: the path to the certificate file (the signature to be included)")
+    print("    - {p7s_file}: the path to the CMS signature file")
     print("    - {keyfile}: the path to the keyfile")
     print("    These arguments will be set by the ova-compose tool and passed to the script.")
     print("    It is expected that the script signs the file given by {mf_file} and writes the signature to {cert_file}.")
-    print("    Refer to the DMTF DSP2434 specification for more details on the signature format.")
+    print("    Refer to the DMTF DSP0243 specification for more details on the signature format.")
+    print("    With --sign-format p7s, the script is expected to write a DER encoded, detached CMS SignedData (RFC 5652)")
+    print("    over the contents of {mf_file} to {p7s_file}. It may contain one or more signers.")
+    print("    With --sign-format both, the script is expected to write both {cert_file} and {p7s_file}. The signer")
+    print("    of {cert_file} must be one of the signers in {p7s_file}.")
+    print("    The digest algorithm for p7s must be sha256 or stronger.")
     print("    The script should be executable and should be in the PATH or the full path to the script should be provided.")
     print("")
     print("Example usage:")
@@ -1405,12 +1446,13 @@ def main():
     sign_keyfile = None
     sign_alg = None
     sign_script = None
+    sign_format = "cert"
     tar_format = "gnu"
 
     try:
         opts, args = getopt.getopt(sys.argv[1:],
             'f:hi:mo:q',
-            longopts=['format=', 'input-file=', 'manifest', 'output-file=', 'param=', 'checksum-type=', 'sign=', 'sign-alg=', 'sign-script=', 'tar-format=', 'vmdk-convert='])
+            longopts=['format=', 'input-file=', 'manifest', 'output-file=', 'param=', 'checksum-type=', 'sign=', 'sign-alg=', 'sign-script=', 'sign-format=', 'tar-format=', 'vmdk-convert='])
     except:
         print ("invalid option")
         sys.exit(2)
@@ -1442,6 +1484,8 @@ def main():
             sign_alg = a
         elif o in ['--sign-script']:
             sign_script = a
+        elif o in ['--sign-format']:
+            sign_format = a
         elif o in ['-h']:
             usage()
             sys.exit(0)
@@ -1454,7 +1498,11 @@ def main():
     assert checksum_type in ["sha1", "sha512", "sha256"], f"checksum-type '{checksum_type}' is invalid"
     if sign_alg is None:
         sign_alg = checksum_type
-    assert sign_alg in ["sha1", "sha512", "sha256"], f"checksum-type '{sign_alg}' is invalid"
+    assert sign_alg in ["sha1", "sha512", "sha256"], f"sign-alg '{sign_alg}' is invalid"
+    assert sign_format in ["cert", "p7s", "both"], f"sign-format '{sign_format}' is invalid"
+    if sign_format != "cert":
+        assert sign_script is not None, f"sign-format '{sign_format}' requires --sign-script"
+        assert sign_alg != "sha1", f"sign-alg 'sha1' is not allowed with sign-format '{sign_format}'"
 
     if sign_keyfile is not None:
         sign_keyfile = os.path.abspath(sign_keyfile)
@@ -1507,10 +1555,8 @@ def main():
         if do_manifest:
             ovf.write_manifest(ovf_file=ovf_file, mf_file=mf_file, hash_type=checksum_type)
             if sign_keyfile is not None or sign_script is not None:
-                if sign_script is None:
-                    ovf.sign_manifest(sign_keyfile, ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg)
-                else:
-                    ovf.sign_manifest_external(sign_script, sign_keyfile, ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg)
+                ovf.sign_package(sign_keyfile, sign_script, ovf_file=ovf_file, mf_file=mf_file,
+                                 sign_alg=sign_alg, sign_format=sign_format)
     elif output_format == "ova" or output_format == "dir":
         pwd = os.getcwd()
         tmpdir = tempfile.mkdtemp(prefix=f"{basename}-", dir=pwd)
@@ -1527,12 +1573,10 @@ def main():
 
             ovf.write_manifest(ovf_file=ovf_file, mf_file=mf_file, hash_type=checksum_type)
             if sign_keyfile is not None or sign_script is not None:
-                if sign_script is None:
-                    ovf.sign_manifest(sign_keyfile, ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg)
-                else:
-                    ovf.sign_manifest_external(sign_script, sign_keyfile, ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg)
-                cert_file = os.path.splitext(ovf_file)[0] + ".cert"
-                all_files.append(cert_file)
+                sign_files = ovf.sign_package(sign_keyfile, sign_script, ovf_file=ovf_file, mf_file=mf_file,
+                                              sign_alg=sign_alg, sign_format=sign_format)
+                # signature files go right after the manifest, before the disks
+                all_files[2:2] = sign_files
 
             if output_format == "ova":
                 ret = subprocess.check_call(["tar", f"--format={tar_format}", "-h",

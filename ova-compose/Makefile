@@ -14,11 +14,14 @@
 # ================================================================================
 
 EXE=ova-compose
+SCRIPTS=sign-p7s.sh
 
 PREFIX ?= /usr
+DATADIR ?= $(PREFIX)/share/open-vmdk
 
 all:
 
 install:
 	mkdir -p $(DESTDIR)/$(PREFIX)/bin && cp $(EXE).py $(DESTDIR)/$(PREFIX)/bin/$(EXE)
+	mkdir -p $(DESTDIR)/$(DATADIR)/ && install -m 755 $(SCRIPTS) $(DESTDIR)/$(DATADIR)/
 
