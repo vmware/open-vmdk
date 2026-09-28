@@ -1305,7 +1305,7 @@ class OVF(object):
 
         with open(cert_file, "wt") as f:
             signature = subprocess.check_output(["openssl", "dgst", f"-{sign_alg}", "-sign", keyfile, "-out", "-", mf_file])
-            f.write(f"{sign_alg.upper()}({mf_file})= {signature.hex()}\n")
+            f.write(f"{sign_alg.upper()}({os.path.basename(mf_file)})= {signature.hex()}\n")
 
             with open(keyfile, "rt") as fin:
                 do_copy = False
@@ -1341,9 +1341,9 @@ def usage():
     print("  -f, --format ova|ovf|dir    output format")
     print("  -m, --manifest              create manifest file along with ovf (default true for output formats ova and dir)")
     print("  --checksum-type sha1|sha256|sha512  set the checksum type for the manifest. Must be sha1, sha256 or sha512.")
-    print("  --sign <keyfile>            sign the manifest file with the given keyfile")
+    print("  --sign <keyfile>            sign the manifest file with the given keyfile (implies -m)")
     print("  --sign-alg sha1|sha256|sha512  set the signature algorithm for the manifest. Must be sha1, sha256 or sha512. Default is the same as the checksum-type.")
-    print("  --sign-script <script>      sign the manifest file with the given script")
+    print("  --sign-script <script>      sign the manifest file with the given script (implies -m)")
     print("  --tar-format gnu|posix      set the tar format for the ova file. Must be gnu or posix. Default is gnu.")
     print("  --vmdk-convert <path>       set the path to the vmdk-convert tool (optional)")
     print("  -q                          quiet mode")
@@ -1459,6 +1459,10 @@ def main():
     if sign_keyfile is not None:
         sign_keyfile = os.path.abspath(sign_keyfile)
 
+    if sign_keyfile is not None or sign_script is not None:
+        # signing requires a manifest to sign, so make sure one gets created
+        do_manifest = True
+
     if config_file != None:
         f = open(config_file, 'r')
 
@@ -1494,6 +1498,7 @@ def main():
 
     if output_format == "ovf":
         ovf_file = output_file
+        mf_file = os.path.join(os.path.dirname(ovf_file), mf_file)
         ovf.write_xml(ovf_file=ovf_file)
         if do_manifest:
             ovf.write_manifest(ovf_file=ovf_file, mf_file=mf_file, hash_type=checksum_type)
