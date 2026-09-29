@@ -42,6 +42,15 @@ class TestOVFSigning:
         self.work_dir = WORK_DIR
         self.keyfile = os.path.join(self.work_dir, "test_key.pem")
         self.create_test_key()
+        if sign_alg == "sha1" and not self.digest_supported(sign_alg):
+            pytest.skip("OpenSSL policy does not allow signing with sha1")
+
+    def digest_supported(self, alg):
+        """Check whether openssl can sign with the given digest"""
+        result = subprocess.run(
+            ["openssl", "dgst", f"-{alg}", "-sign", self.keyfile, "-out", os.devnull, self.keyfile],
+            capture_output=True)
+        return result.returncode == 0
 
     def create_test_key(self):
         """Create a test private key and certificate for signing"""
