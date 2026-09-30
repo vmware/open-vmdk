@@ -144,6 +144,49 @@ class TestOVFSigning:
         # Verify signature
         self.verify_signature(out_mf, out_cert, self.sign_alg)
 
+    def test_ovf_signing_output_dir_differs_from_cwd(self):
+        """Test that .mf/.cert land next to the .ovf even when -o points elsewhere than cwd"""
+        in_yaml = os.path.join(CONFIG_DIR, "basic.yaml")
+        basename = os.path.basename(in_yaml.rsplit(".", 1)[0])
+        out_subdir = os.path.join(self.work_dir, f"{basename}_{self.sign_alg}_subdirtest")
+        os.makedirs(out_subdir, exist_ok=True)
+        out_basename = f"{basename}_{self.sign_alg}_subdirtest"
+        out_ovf = os.path.join(out_subdir, f"{out_basename}.ovf")
+        out_mf = os.path.join(out_subdir, f"{out_basename}.mf")
+        out_cert = os.path.join(out_subdir, f"{out_basename}.cert")
+
+        # Run ova-compose from self.work_dir while -o points into a different subdirectory
+        args = [
+            OVA_COMPOSE, "-i", in_yaml, "-o", out_ovf, "-m",
+            "--sign", self.keyfile, "--sign-alg", self.sign_alg,
+            "--vmdk-convert", VMDK_CONVERT
+        ]
+
+        process = subprocess.run(args, cwd=self.work_dir)
+        assert process.returncode == 0
+
+        # .mf must be a sibling of the .ovf, not dropped in cwd
+        assert os.path.isfile(out_ovf), "OVF file not created"
+        assert os.path.isfile(out_mf), "Manifest file not created next to the .ovf"
+        assert os.path.isfile(out_cert), "Certificate file not created next to the .ovf"
+        assert not os.path.isfile(os.path.join(self.work_dir, f"{out_basename}.mf")), \
+            "Manifest file was written to cwd instead of next to the .ovf"
+
+        # disk files referenced in the manifest are not copied for "ovf" format,
+        # only the .ovf itself lives next to the .mf, disk files stay in the original cwd
+        with open(out_mf, "rt") as f:
+            for line in f:
+                left, hash_mf = line.split("=")
+                hash_alg, filename = left.split("(", 1)
+                filename = filename.rstrip(")")
+                base_dir = out_subdir if filename == f"{out_basename}.ovf" else self.work_dir
+                hash_obj = hashlib.new(hash_alg.lower())
+                with open(os.path.join(base_dir, filename), "rb") as fh:
+                    hash_obj.update(fh.read())
+                assert hash_obj.hexdigest() == hash_mf.strip()
+
+        self.verify_signature(out_mf, out_cert, self.sign_alg)
+
     def test_ova_signing(self):
         """Test signing of OVA files"""
         in_yaml = os.path.join(CONFIG_DIR, "basic.yaml")
@@ -213,12 +256,14 @@ class TestOVFSigning:
         self.verify_signature(out_mf, out_cert, self.sign_alg)
 
     def test_signing_without_manifest_fails(self):
-        """Test that signing without manifest creation fails appropriately"""
+        """Test that --sign without -m still creates and signs a manifest"""
         in_yaml = os.path.join(CONFIG_DIR, "basic.yaml")
         basename = os.path.basename(in_yaml.rsplit(".", 1)[0])
         out_ovf = os.path.join(self.work_dir, f"{basename}_no_manifest.ovf")
+        out_mf = os.path.join(self.work_dir, f"{basename}_no_manifest.mf")
+        out_cert = os.path.join(self.work_dir, f"{basename}_no_manifest.cert")
 
-        # Try to sign without creating manifest (should work for OVF format)
+        # Try to sign without passing -m explicitly
         args = [
             OVA_COMPOSE, "-i", in_yaml, "-o", out_ovf,
             "--sign", self.keyfile, "--sign-alg", self.sign_alg,
@@ -226,9 +271,13 @@ class TestOVFSigning:
         ]
 
         process = subprocess.run(args, cwd=self.work_dir)
-        # This should succeed because OVF format doesn't automatically create manifest
-        # but signing will create it
+        # --sign implies manifest creation, so this should succeed and actually sign something
         assert process.returncode == 0
+        assert os.path.isfile(out_mf), "Manifest file not created"
+        assert os.path.isfile(out_cert), "Certificate file not created"
+
+        self.check_mf(out_mf)
+        self.verify_signature(out_mf, out_cert, self.sign_alg)
 
     def test_invalid_key_file(self):
         """Test behavior with invalid key file"""
@@ -465,13 +514,13 @@ echo "keyfile=$KEYFILE" >> {self.work_dir}/captured_params_{self.sign_alg}.txt
         with open(params_file, "r") as f:
             params_content = f.read()
 
-        # Verify all expected parameters are present and have reasonable values
-        # Based on the actual output, some paths are full, some are basenames
-        expected_mf_basename = f"{basename}_params_{self.sign_alg}.mf"
+        # Verify all expected parameters are present and have reasonable values.
+        # mf_file is a full path, sibling of the .ovf, just like ovf_file/cert_file.
+        expected_mf = os.path.join(self.work_dir, f"{basename}_params_{self.sign_alg}.mf")
         expected_cert = os.path.join(self.work_dir, f"{basename}_params_{self.sign_alg}.cert")
 
         assert f"ovf_file={out_ovf}" in params_content
-        assert f"mf_file={expected_mf_basename}" in params_content
+        assert f"mf_file={expected_mf}" in params_content
         assert f"sign_alg={self.sign_alg}" in params_content
         assert f"cert_file={expected_cert}" in params_content
         assert f"keyfile={self.keyfile}" in params_content
