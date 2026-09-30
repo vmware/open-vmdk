@@ -1490,10 +1490,14 @@ def main():
     if not do_quiet:
         print (f"creating '{output_file}' with format '{output_format}' from '{config_file}'")
 
+    basename = os.path.basename(output_file)
     if output_format != "dir":
-        basename = os.path.basename(output_file)[:-4]
-    else:
-        basename = os.path.basename(output_file)
+        # strip the extension only if there is a matching one, the output
+        # file may have an arbitrary name if the format was given explicitly
+        stem, ext = os.path.splitext(basename)
+        if ext.lower() == f".{output_format}":
+            basename = stem
+    assert basename != "", f"invalid output file name '{output_file}'"
     mf_file = f"{basename}.mf"
 
     if output_format == "ovf":
