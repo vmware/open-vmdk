@@ -16,6 +16,7 @@ import pytest
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 
 
@@ -61,8 +62,10 @@ def run_compose(work_dir, name, out_format, sign_args):
     else:
         output = os.path.join(work_dir, name)
         extra = ["--format", "dir"]
-        if os.path.exists(output):
+        if os.path.isdir(output):
             shutil.rmtree(output)
+        elif os.path.exists(output):
+            os.remove(output)
 
     args = [OVA_COMPOSE, "-i", IN_YAML, "-o", output, "--vmdk-convert", VMDK_CONVERT] + extra + sign_args
     process = subprocess.run(args, cwd=work_dir, capture_output=True, text=True)
@@ -270,3 +273,70 @@ class TestP7sSigningErrors:
         process, _ = run_compose(self.work_dir, "err_format", "ova",
                                  ["--sign-format", "pkcs7", "--sign", self.rsa_key])
         assert process.returncode != 0
+
+    def test_p7s_with_embedded_content(self):
+        # an attached (non detached) signature must be rejected
+        script = self.write_script("attached_p7s.sh",
+            f'openssl cms -sign -binary -nosmimecap -nodetach -in "$1" -signer {self.rsa_key} -outform DER -out "$2"\n')
+        process, _ = run_compose(self.work_dir, "err_attached", "ova",
+                                 ["--sign-format", "p7s", "--sign-script", f"{script} {{mf_file}} {{p7s_file}}"])
+        assert process.returncode != 0
+        assert "detached" in process.stderr
+
+    def test_cert_signature_failure_is_detected(self):
+        # if the digest/sign step for the .cert fails, the script must fail
+        # instead of writing a .cert without signature
+        real_openssl = shutil.which("openssl")
+        shim_dir = os.path.join(self.work_dir, "shim-bin")
+        os.makedirs(shim_dir, exist_ok=True)
+        shim = os.path.join(shim_dir, "openssl")
+        with open(shim, "wt") as f:
+            f.write(f'#!/bin/bash\n[ "$1" = "dgst" ] && exit 1\nexec {real_openssl} "$@"\n')
+        os.chmod(shim, 0o755)
+
+        script = f"{SIGN_P7S} -a {{sign_alg}} -c {{cert_file}} {{mf_file}} {{p7s_file}} {self.rsa_key}"
+        args = [sys.executable, OVA_COMPOSE, "-i", IN_YAML, "-o", os.path.join(self.work_dir, "err_dgst.ova"),
+                "--vmdk-convert", VMDK_CONVERT, "--sign-format", "both", "--sign-script", script]
+        process = subprocess.run(args, cwd=self.work_dir, capture_output=True, text=True,
+                                 env=dict(os.environ, PATH=shim_dir + os.pathsep + os.environ["PATH"]))
+        assert process.returncode != 0
+
+    def test_p7s_sha1_default_message(self):
+        # sha1 comes from the checksum-type default here, the message must say so
+        script = f"{SIGN_P7S} {{mf_file}} {{p7s_file}} {self.rsa_key}"
+        process, _ = run_compose(self.work_dir, "err_sha1_default", "ova",
+                                 ["--sign-format", "p7s", "--sign-script", script, "--checksum-type", "sha1"])
+        assert process.returncode != 0
+        assert "checksum-type" in process.stderr
+        assert "--sign-alg sha256" in process.stderr
+
+    def test_sign_without_openssl(self):
+        # --sign uses openssl, so it must fail early with a clear message
+        empty_bin = os.path.join(self.work_dir, "empty-bin")
+        os.makedirs(empty_bin, exist_ok=True)
+        args = [sys.executable, OVA_COMPOSE, "-i", IN_YAML, "-o", os.path.join(self.work_dir, "err_noopenssl.ova"),
+                "--vmdk-convert", VMDK_CONVERT, "--sign", self.rsa_key]
+        process = subprocess.run(args, cwd=self.work_dir, capture_output=True, text=True,
+                                 env=dict(os.environ, PATH=empty_bin))
+        assert process.returncode != 0
+        assert "openssl is required" in process.stderr
+
+    def test_script_signing_without_openssl(self):
+        # a script that does not need openssl (e.g. a signing server) must still work,
+        # the p7s check is skipped. Create a p7s beforehand and have the script copy it.
+        good = os.path.join(self.work_dir, "prebuilt.p7s")
+        mf = os.path.join(self.work_dir, "prebuilt.mf")
+        with open(mf, "wt") as f:
+            f.write("x\n")
+        subprocess.run(["openssl", "cms", "-sign", "-binary", "-nosmimecap", "-in", mf, "-signer", self.rsa_key,
+                        "-outform", "DER", "-out", good], check=True)
+        script = f"/bin/cp {good} {{p7s_file}}"
+        empty_bin = os.path.join(self.work_dir, "empty-bin")
+        os.makedirs(empty_bin, exist_ok=True)
+        args = [sys.executable, OVA_COMPOSE, "-i", IN_YAML, "-o", os.path.join(self.work_dir, "noossl.ovf"),
+                "--vmdk-convert", VMDK_CONVERT, "--sign-format", "p7s", "--sign-script", script]
+        process = subprocess.run(args, cwd=self.work_dir, capture_output=True, text=True,
+                                 env=dict(os.environ, PATH=empty_bin))
+        assert process.returncode == 0, process.stderr
+        assert os.path.isfile(os.path.join(self.work_dir, "noossl.p7s"))
+        assert "openssl not found" in process.stderr

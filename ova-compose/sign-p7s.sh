@@ -27,6 +27,7 @@
 #     --sign-script "sign-p7s.sh -a {sign_alg} -c {cert_file} {mf_file} {p7s_file} rsa.pem mldsa.pem"
 
 set -e
+set -o pipefail
 
 usage() {
     echo "Usage: $0 [-a <digest>] [-c <cert_file>] <mf_file> <p7s_file> <keyfile> [<keyfile> ...]" >&2
@@ -46,6 +47,11 @@ done
 shift $((OPTIND - 1))
 
 [ $# -ge 3 ] || usage
+
+if ! command -v openssl >/dev/null 2>&1; then
+    echo "$0: openssl not found in PATH" >&2
+    exit 1
+fi
 
 mf_file=$1
 p7s_file=$2

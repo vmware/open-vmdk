@@ -1324,12 +1324,25 @@ class OVF(object):
 
     @staticmethod
     def _check_p7s(p7s_file):
-        # sanity check only, the signature itself is not verified:
-        # must be a DER SEQUENCE containing the signedData OID
+        # Best effort sanity check, the signature itself is not verified.
+        # openssl is not required here, since the signing script may not need it
+        # (for example when it uses a signing server).
         with open(p7s_file, "rb") as f:
             data = f.read()
         assert data[:1] == b"\x30", f"signature file {p7s_file} is not DER encoded"
         assert CMS_SIGNED_DATA_OID in data[:64], f"signature file {p7s_file} is not a CMS SignedData"
+
+        if shutil.which("openssl") is None:
+            print(f"warning: openssl not found, not validating the structure of {p7s_file}", file=sys.stderr)
+            return
+
+        # the structure must be parseable, the content must be detached,
+        # and there must be at least one signer
+        process = subprocess.run(["openssl", "cms", "-cmsout", "-print", "-inform", "DER", "-in", p7s_file],
+                                 capture_output=True, text=True)
+        assert process.returncode == 0, f"signature file {p7s_file} is not a valid CMS structure: {process.stderr.strip()}"
+        assert "eContent: <ABSENT>" in process.stdout, f"signature file {p7s_file} must not contain the signed content (detached signature expected)"
+        assert "signatureAlgorithm:" in process.stdout, f"signature file {p7s_file} contains no signer"
 
 
     def sign_manifest_external(self, keyfile, script_format, ovf_file=None, mf_file=None, sign_alg="sha512", sign_format="cert"):
@@ -1357,7 +1370,7 @@ class OVF(object):
 
 
     def sign_package(self, keyfile, script_format, ovf_file=None, mf_file=None, sign_alg="sha512", sign_format="cert"):
-        if ovf_file == None:
+        if ovf_file is None:
             ovf_file = f"{self.name}.ovf"
         if script_format is None:
             self.sign_manifest(keyfile, ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg)
@@ -1496,16 +1509,24 @@ def main():
     assert output_file != None, "no output file/directory specified"
 
     assert checksum_type in ["sha1", "sha512", "sha256"], f"checksum-type '{checksum_type}' is invalid"
+    sign_alg_given = sign_alg is not None
     if sign_alg is None:
         sign_alg = checksum_type
     assert sign_alg in ["sha1", "sha512", "sha256"], f"sign-alg '{sign_alg}' is invalid"
     assert sign_format in ["cert", "p7s", "both"], f"sign-format '{sign_format}' is invalid"
     if sign_format != "cert":
         assert sign_script is not None, f"sign-format '{sign_format}' requires --sign-script"
-        assert sign_alg != "sha1", f"sign-alg 'sha1' is not allowed with sign-format '{sign_format}'"
+        if sign_alg == "sha1":
+            if sign_alg_given:
+                reason = "sign-alg 'sha1'"
+            else:
+                reason = "sign-alg 'sha1' (the default, taken from checksum-type)"
+            assert False, f"{reason} is not allowed with sign-format '{sign_format}', use --sign-alg sha256 or sha512"
 
     if sign_keyfile is not None:
         sign_keyfile = os.path.abspath(sign_keyfile)
+        if sign_script is None:
+            assert shutil.which("openssl") is not None, "openssl is required to sign with --sign, but was not found in PATH"
 
     if sign_keyfile is not None or sign_script is not None:
         # signing requires a manifest to sign, so make sure one gets created
