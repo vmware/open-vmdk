@@ -1389,7 +1389,7 @@ def usage():
     print("  -m, --manifest              create manifest file along with ovf (default true for output formats ova and dir)")
     print("  --checksum-type sha1|sha256|sha512  set the checksum type for the manifest. Must be sha1, sha256 or sha512.")
     print("  --sign <keyfile>            sign the manifest file with the given keyfile (implies -m)")
-    print("  --sign-alg sha1|sha256|sha512  set the signature algorithm for the manifest. Must be sha1, sha256 or sha512. Default is the same as the checksum-type.")
+    print("  --sign-alg sha1|sha256|sha384|sha512  set the signature algorithm for the manifest. Must be sha1, sha256, sha384 or sha512 (sha384 only with --sign-format p7s). Default is the same as the checksum-type.")
     print("  --sign-script <script>      sign the manifest file with the given script (implies -m)")
     print("  --sign-format cert|p7s|both  set the signature file format. Must be cert, p7s or both. Default is cert. p7s and both require --sign-script.")
     print("  --tar-format gnu|posix      set the tar format for the ova file. Must be gnu or posix. Default is gnu.")
@@ -1407,7 +1407,7 @@ def usage():
     print("Sign options:")
     print("    To sign the manifest file, you can use the --sign option to provide a keyfile, or the --sign-script option to provide a script.")
     print("    The keyfile should be a PEM encoded certificate and key file.")
-    print("    Optionally, the signature algorithm (sha1, sha256, sha512) can be set with the --sign-alg option. Default is the same as the checksum-type.")
+    print("    Optionally, the signature algorithm (sha1, sha256, sha512, and sha384 for p7s only) can be set with the --sign-alg option. Default is the same as the checksum-type.")
     print("    If no sign-script is given, ova-compose will use the keyfile to sign the manifest using openssl.")
     print("    If a sign-script is given, it should be a shell python style format string that takes the following arguments:")
     print("    - {ovf_file}: the path to the ovf file")
@@ -1423,7 +1423,7 @@ def usage():
     print("    over the contents of {mf_file} to {p7s_file}. It may contain one or more signers.")
     print("    With --sign-format both, the script is expected to write both {cert_file} and {p7s_file}. The signer")
     print("    of {cert_file} must be one of the signers in {p7s_file}.")
-    print("    The digest algorithm for p7s must be sha256 or stronger.")
+    print("    The digest algorithm for p7s must be sha256, sha384 or sha512.")
     print("    The script should be executable and should be in the PATH or the full path to the script should be provided.")
     print("")
     print("Example usage:")
@@ -1512,8 +1512,11 @@ def main():
     sign_alg_given = sign_alg is not None
     if sign_alg is None:
         sign_alg = checksum_type
-    assert sign_alg in ["sha1", "sha512", "sha256"], f"sign-alg '{sign_alg}' is invalid"
+    assert sign_alg in ["sha1", "sha256", "sha384", "sha512"], f"sign-alg '{sign_alg}' is invalid"
     assert sign_format in ["cert", "p7s", "both"], f"sign-format '{sign_format}' is invalid"
+    if sign_alg == "sha384":
+        # the legacy .cert format does not support sha384
+        assert sign_format == "p7s", f"sign-alg 'sha384' is only allowed with sign-format 'p7s'"
     if sign_format != "cert":
         assert sign_script is not None, f"sign-format '{sign_format}' requires --sign-script"
         if sign_alg == "sha1":
@@ -1586,18 +1589,20 @@ def main():
             ovf_file = f"{basename}.ovf"
             ovf.write_xml(ovf_file=ovf_file)
 
-            all_files = [ovf_file, mf_file]
+            disk_files = []
             for file in ovf.files:
                 dst = os.path.basename(file.path)
                 os.symlink(os.path.join(pwd, file.path), dst)
-                all_files.append(dst)
+                disk_files.append(dst)
 
             ovf.write_manifest(ovf_file=ovf_file, mf_file=mf_file, hash_type=checksum_type)
+            sign_files = []
             if sign_keyfile is not None or sign_script is not None:
                 sign_files = ovf.sign_package(sign_keyfile, sign_script, ovf_file=ovf_file, mf_file=mf_file,
                                               sign_alg=sign_alg, sign_format=sign_format)
-                # signature files go right after the manifest, before the disks
-                all_files[2:2] = sign_files
+
+            # order: ovf, manifest, signature files, then the disks and other files
+            all_files = [ovf_file, mf_file] + sign_files + disk_files
 
             if output_format == "ova":
                 ret = subprocess.check_call(["tar", f"--format={tar_format}", "-h",

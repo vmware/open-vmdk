@@ -173,19 +173,6 @@ class TestP7sSigning:
                                              "-print_certs"]).decode()
         assert cert_of(cert_file) in p7s_certs
 
-    def test_ova_file_order(self):
-        if self.out_format != "ova":
-            pytest.skip("only for ova")
-        name = "p7s_order"
-        script = f"{SIGN_P7S} -a {{sign_alg}} -c {{cert_file}} {{mf_file}} {{p7s_file}} {self.rsa_key}"
-        process, _ = run_compose(self.work_dir, name, self.out_format,
-                                 ["--sign-format", "both", "--sign-script", script])
-        assert process.returncode == 0, process.stderr
-
-        with tarfile.open(os.path.join(self.work_dir, f"{name}.ova")) as tar:
-            names = tar.getnames()
-        assert names[:4] == [f"{name}.ovf", f"{name}.mf", f"{name}.cert", f"{name}.p7s"]
-
     def test_hybrid_mldsa(self):
         if openssl_version() < (3, 5):
             pytest.skip("ML-DSA requires OpenSSL 3.5 or later")
@@ -197,6 +184,90 @@ class TestP7sSigning:
         assert process.returncode == 0, process.stderr
         verify_p7s(os.path.join(pkg_dir, f"{name}.p7s"), os.path.join(pkg_dir, f"{name}.mf"),
                    [self.rsa_key, mldsa_key])
+
+    def test_sha384(self):
+        name = f"p7s_sha384_{self.out_format}"
+        script = f"{SIGN_P7S} -a {{sign_alg}} {{mf_file}} {{p7s_file}} {self.rsa_key} {self.ec_key}"
+        process, pkg_dir = run_compose(self.work_dir, name, self.out_format,
+                                       ["--sign-format", "p7s", "--sign-script", script, "--sign-alg", "sha384"])
+        assert process.returncode == 0, process.stderr
+
+        p7s_file = os.path.join(pkg_dir, f"{name}.p7s")
+        verify_p7s(p7s_file, os.path.join(pkg_dir, f"{name}.mf"), [self.rsa_key, self.ec_key])
+        assert "sha384" in print_p7s(p7s_file)
+
+    def test_hybrid_mldsa_last_with_cert(self):
+        # with -c the first key must be RSA or EC, the order of the others does not matter
+        if openssl_version() < (3, 5):
+            pytest.skip("ML-DSA requires OpenSSL 3.5 or later")
+        mldsa_key = create_key(self.work_dir, "mldsa", "mldsa65")
+        name = f"p7s_mldsa_cert_{self.out_format}"
+        script = (f"{SIGN_P7S} -a {{sign_alg}} -c {{cert_file}} "
+                  f"{{mf_file}} {{p7s_file}} {self.rsa_key} {mldsa_key}")
+        process, pkg_dir = run_compose(self.work_dir, name, self.out_format,
+                                       ["--sign-format", "both", "--sign-script", script, "--sign-alg", "sha512"])
+        assert process.returncode == 0, process.stderr
+        assert cert_of(os.path.join(pkg_dir, f"{name}.cert")) == cert_of(self.rsa_key)
+        verify_p7s(os.path.join(pkg_dir, f"{name}.p7s"), os.path.join(pkg_dir, f"{name}.mf"),
+                   [self.rsa_key, mldsa_key])
+
+    def test_mldsa_first_without_cert(self):
+        # without -c the order does not matter
+        if openssl_version() < (3, 5):
+            pytest.skip("ML-DSA requires OpenSSL 3.5 or later")
+        mldsa_key = create_key(self.work_dir, "mldsa", "mldsa65")
+        name = f"p7s_mldsa_first_{self.out_format}"
+        script = f"{SIGN_P7S} -a {{sign_alg}} {{mf_file}} {{p7s_file}} {mldsa_key} {self.rsa_key}"
+        process, pkg_dir = run_compose(self.work_dir, name, self.out_format,
+                                       ["--sign-format", "p7s", "--sign-script", script, "--sign-alg", "sha512"])
+        assert process.returncode == 0, process.stderr
+        verify_p7s(os.path.join(pkg_dir, f"{name}.p7s"), os.path.join(pkg_dir, f"{name}.mf"),
+                   [self.rsa_key, mldsa_key])
+
+
+@pytest.mark.parametrize("setup_test", [WORK_DIR], indirect=True)
+class TestP7sOvaLayout:
+    """The order of the files in the OVA: ovf, manifest, signature files, then the other files"""
+
+    @pytest.fixture(autouse=True)
+    def setup_class(self, setup_test):
+        self.work_dir = WORK_DIR
+        self.rsa_key = create_key(self.work_dir, "rsa", "rsa:2048")
+
+    def ova_names(self, name, sign_format):
+        script = f"{SIGN_P7S} -a {{sign_alg}} -c {{cert_file}} {{mf_file}} {{p7s_file}} {self.rsa_key}"
+        process, _ = run_compose(self.work_dir, name, "ova",
+                                 ["--sign-format", sign_format, "--sign-script", script])
+        assert process.returncode == 0, process.stderr
+        with tarfile.open(os.path.join(self.work_dir, f"{name}.ova")) as tar:
+            return tar.getnames()
+
+    def test_order_both(self):
+        name = "p7s_order_both"
+        names = self.ova_names(name, "both")
+        assert names[:4] == [f"{name}.ovf", f"{name}.mf", f"{name}.cert", f"{name}.p7s"]
+        assert len(names) > 4, "disk files missing"
+
+    def test_order_p7s(self):
+        name = "p7s_order_p7s"
+        script = f"{SIGN_P7S} -a {{sign_alg}} {{mf_file}} {{p7s_file}} {self.rsa_key}"
+        process, _ = run_compose(self.work_dir, name, "ova",
+                                 ["--sign-format", "p7s", "--sign-script", script])
+        assert process.returncode == 0, process.stderr
+        with tarfile.open(os.path.join(self.work_dir, f"{name}.ova")) as tar:
+            names = tar.getnames()
+        assert names[:3] == [f"{name}.ovf", f"{name}.mf", f"{name}.p7s"]
+        assert len(names) > 3, "disk files missing"
+        assert f"{name}.cert" not in names
+
+    def test_order_cert(self):
+        name = "p7s_order_cert"
+        process, _ = run_compose(self.work_dir, name, "ova", ["--sign", self.rsa_key])
+        assert process.returncode == 0, process.stderr
+        with tarfile.open(os.path.join(self.work_dir, f"{name}.ova")) as tar:
+            names = tar.getnames()
+        assert names[:3] == [f"{name}.ovf", f"{name}.mf", f"{name}.cert"]
+        assert len(names) > 3, "disk files missing"
 
 
 @pytest.mark.parametrize("setup_test", [WORK_DIR], indirect=True)
@@ -340,3 +411,28 @@ class TestP7sSigningErrors:
         assert process.returncode == 0, process.stderr
         assert os.path.isfile(os.path.join(self.work_dir, "noossl.p7s"))
         assert "openssl not found" in process.stderr
+
+    @pytest.mark.parametrize("sign_format", ["cert", "both"])
+    def test_sha384_only_for_p7s(self, sign_format):
+        script = f"{SIGN_P7S} -a {{sign_alg}} -c {{cert_file}} {{mf_file}} {{p7s_file}} {self.rsa_key}"
+        process, _ = run_compose(self.work_dir, f"err_sha384_{sign_format}", "ova",
+                                 ["--sign-format", sign_format, "--sign-script", script, "--sign-alg", "sha384"])
+        assert process.returncode != 0
+        assert "sha384" in process.stderr
+
+    def test_sha384_with_keyfile(self):
+        process, _ = run_compose(self.work_dir, "err_sha384_key", "ova",
+                                 ["--sign", self.rsa_key, "--sign-alg", "sha384"])
+        assert process.returncode != 0
+        assert "sha384" in process.stderr
+
+    def test_cert_with_mldsa_first_key(self):
+        if openssl_version() < (3, 5):
+            pytest.skip("ML-DSA requires OpenSSL 3.5 or later")
+        mldsa_key = create_key(self.work_dir, "mldsa", "mldsa65")
+        script = (f"{SIGN_P7S} -a {{sign_alg}} -c {{cert_file}} "
+                  f"{{mf_file}} {{p7s_file}} {mldsa_key} {self.rsa_key}")
+        process, _ = run_compose(self.work_dir, "err_mldsa_first", "ova",
+                                 ["--sign-format", "both", "--sign-script", script, "--sign-alg", "sha512"])
+        assert process.returncode != 0
+        assert "only RSA and EC keys are supported" in process.stderr

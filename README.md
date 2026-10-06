@@ -272,7 +272,7 @@ Options:
 * `--param <key=value>`: set parameter `<key>` to `<value>`
 * `--checksum-type sha256|sha512`: the checksum type used for the manifest file. The default is `sha256`.
 * `--sign <keyfile>`: sign the manifest with the given PEM file containing the private key and certificate. This creates a legacy `.cert` file.
-* `--sign-alg sha1|sha256|sha512`: the digest algorithm used for signing. The default is the same as `--checksum-type`.
+* `--sign-alg sha1|sha256|sha384|sha512`: the digest algorithm used for signing. `sha384` is only allowed with `--sign-format p7s`, and `sha1` is not allowed for `p7s` and `both`. The default is the same as `--checksum-type`.
 * `--sign-script <script>`: sign the manifest using an external script. See below.
 * `--sign-format cert|p7s|both`: the signature file(s) to create. The default is `cert`. `p7s` and `both` require `--sign-script`.
 
@@ -283,7 +283,7 @@ Options:
 
 The script runs once, after the manifest has been written. What it has to create depends on `--sign-format`:
 * `cert`: the legacy certificate file `{cert_file}` as defined in DMTF DSP0243.
-* `p7s`: a DER encoded, detached CMS SignedData (RFC 5652) over the contents of `{mf_file}`, written to `{p7s_file}`. It may contain one or more signers, for example a classical and a post-quantum signer, and signers may carry RFC 3161 timestamps. The digest algorithm must be `sha256` or stronger.
+* `p7s`: a DER encoded, detached CMS SignedData (RFC 5652) over the contents of `{mf_file}`, written to `{p7s_file}`. It may contain one or more signers, for example a classical and a post-quantum signer, and signers may carry RFC 3161 timestamps. The digest algorithm must be `sha256`, `sha384` or `sha512`.
 * `both`: both files. The signer of `{cert_file}` must be one of the signers in `{p7s_file}`.
 
 `ova-compose` checks that the files were created and look like the right format, but does not verify the signatures.

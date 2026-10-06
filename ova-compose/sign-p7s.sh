@@ -20,7 +20,9 @@
 # the private key and the certificate. All signers use the same digest.
 # ML-DSA keys require OpenSSL 3.5 or later.
 #
-# With -c, also writes a legacy .cert file signed by the first keyfile.
+# With -c, also writes a legacy .cert file, signed by the first keyfile. The
+# .cert format only supports RSA and EC keys, so with -c the first keyfile
+# must be an RSA or EC key. Without -c, the order of the keyfiles does not matter.
 #
 # Example:
 #   ova-compose -i photon.yaml -o photon.ova --sign-format both \
@@ -62,12 +64,25 @@ for keyfile in "$@"; do
     signer_args+=(-signer "${keyfile}")
 done
 
+if [ -n "${cert_file}" ]; then
+    cert_keyfile=$1
+
+    # the legacy .cert format only supports RSA and EC keys
+    key_alg=$(openssl x509 -in "${cert_keyfile}" -noout -text | sed -n 's/^ *Public Key Algorithm: *//p')
+    case "${key_alg}" in
+        rsaEncryption|id-ecPublicKey) ;;
+        *)
+            echo "$0: cannot sign the .cert with ${cert_keyfile} (${key_alg}), only RSA and EC keys are supported, so with -c the first keyfile must be an RSA or EC key." >&2
+            exit 1
+            ;;
+    esac
+fi
+
 openssl cms -sign -binary -nosmimecap -cades -md "${sign_alg}" \
     "${signer_args[@]}" -in "${mf_file}" -outform DER -out "${p7s_file}"
 
 if [ -n "${cert_file}" ]; then
-    keyfile=$1
-    signature=$(openssl dgst -"${sign_alg}" -sign "${keyfile}" -out - "${mf_file}" | od -An -v -tx1 | tr -d ' \n')
+    signature=$(openssl dgst -"${sign_alg}" -sign "${cert_keyfile}" -out - "${mf_file}" | od -An -v -tx1 | tr -d ' \n')
     echo "${sign_alg^^}($(basename "${mf_file}"))= ${signature}" > "${cert_file}"
-    sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' "${keyfile}" >> "${cert_file}"
+    sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' "${cert_keyfile}" >> "${cert_file}"
 fi
