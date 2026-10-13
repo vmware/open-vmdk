@@ -2,6 +2,10 @@ name: open-vmdk CI
 
 on: [push, workflow_dispatch]
 
+permissions:
+  contents: read
+  actions: read
+
 env:
     POI_REGISTRY: poi-registry:5000
     POI_IMAGE_BASE: poi-registry:5000/photon/installer:latest

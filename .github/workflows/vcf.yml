@@ -1,0 +1,49 @@
+name: tdnf VCF workflow
+
+on: [push, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+    build:
+        runs-on:
+            - self-hosted
+            - docker:rootless
+        steps:
+            - name: checkout code
+              uses: actions/checkout@v3
+
+            - name: create tarball
+              working-directory: ${{ github.workspace }}
+              run: |
+                  VERSION=$(cat VERSION)
+                  FULL_NAME=tdnf-${VERSION}
+                  tar zcf ${FULL_NAME}.tar.gz --transform "s,^,${FULL_NAME}/," $(git ls-files)
+                  cat tdnf.spec.in | sed s/@PROJECT_VERSION@/${VERSION}/g > tdnf.spec
+
+            - name: build RPMs
+              working-directory: ${{ github.workspace }}
+              run: |
+                  PWD=$(pwd)
+                  mkdir -p photon
+                  docker run --privileged --rm \
+                      -v${PWD}/photon:/usr/src/photon \
+                      -v${PWD}:/usr/src/photon/SOURCES \
+                      photon/installer \
+                          create-pkg \
+                          -v 5.0 tdnf --skip-checksum -o
+
+            - name: copy artifacts and create repo
+              run: |
+                  rm -rf photon/RPMS/repodata
+                  mkdir -p ${HOME}/artifacts/tdnf/${GITHUB_SHA::7}
+                  cp -r photon/RPMS/ ${HOME}/artifacts/tdnf/${GITHUB_SHA::7}/
+                  cp -r photon/SRPMS/ ${HOME}/artifacts/tdnf/${GITHUB_SHA::7}/
+                  cd ${HOME}/artifacts/tdnf/${GITHUB_SHA::7} && createrepo .
+
+            - name: set symlink for dev
+              run: |
+                  if [[ "${{ github.ref_name }}" == "dev" ]] ; then
+                      cd ${HOME}/artifacts/tdnf/ && rm -f dev && ln -fs ${GITHUB_SHA::7} ./dev
+                  fi
