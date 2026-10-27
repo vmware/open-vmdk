@@ -392,10 +392,19 @@ isZeroed(const void *data,
          size_t len)
 {
     const uint64_t *data64 = data;
-    len = len >> 3;
+    const uint8_t *data8;
+    size_t len64 = len >> 3;
 
-    while (len--) {
+    while (len64--) {
         if (*data64++ != 0) {
+            return false;
+        }
+    }
+    /* trailing bytes if len is not a multiple of 8 */
+    data8 = (const uint8_t *)data64;
+    len &= 7;
+    while (len--) {
+        if (*data8++ != 0) {
             return false;
         }
     }
