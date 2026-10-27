@@ -802,6 +802,14 @@ writeDescriptor(int fd, const SparseExtentHeader *hdr, uint32_t sectorSize)
         return false;
     }
 
+    /* The descriptor must not overwrite the metadata following it. */
+    if (strlen(descFile) > hdr->descriptorSize * VMDK_SECTOR_SIZE) {
+        fprintf(stderr, "Descriptor file too large (%zu bytes, maximum is %llu)\n",
+                strlen(descFile), (unsigned long long)(hdr->descriptorSize * VMDK_SECTOR_SIZE));
+        free(descFile);
+        return false;
+    }
+
     success = (pwrite(fd, descFile, strlen(descFile), hdr->descriptorOffset * VMDK_SECTOR_SIZE) == (ssize_t)strlen(descFile));
     free(descFile);
     return success;

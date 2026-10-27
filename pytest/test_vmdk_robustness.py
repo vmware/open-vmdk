@@ -208,3 +208,11 @@ def test_grain_too_short():
 
     process = run_convert(["short-grain.vmdk", "short-grain-back.raw"])
     assert process.returncode != 0
+
+
+def test_descriptor_too_large():
+    """the descriptor must fit into the space reserved for it"""
+    write_file("desc-large.raw", os.urandom(65536))
+    process = run_convert(["-t", "1" * 11000, "desc-large.raw", "desc-large.vmdk"])
+    assert process.returncode != 0
+    assert "Descriptor file too large" in process.stderr
