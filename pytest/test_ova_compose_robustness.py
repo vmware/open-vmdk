@@ -314,3 +314,55 @@ def test_duplicate_explicit_ids():
     process, _ = compose(cdrom_yaml("same").replace(BASE_YAML, yaml_text))
     assert process.returncode != 0
     assert "duplicate file id(s): same" in process.stderr
+
+
+@pytest.mark.parametrize("output", ["out.ovf", "out.ova"])
+def test_same_file_name(output):
+    """two different files with the same name cannot be in one OVF"""
+    os.makedirs(os.path.join(WORK_DIR, "sub"), exist_ok=True)
+    shutil.copy(os.path.join(WORK_DIR, "dummy.vmdk"), os.path.join(WORK_DIR, "sub", "dummy.vmdk"))
+    yaml_text = BASE_YAML + """
+    datadisk:
+        type: hard_disk
+        parent: sata1
+        disk_image: sub/dummy.vmdk
+"""
+    process, _ = compose(yaml_text, output=output)
+    assert process.returncode != 0
+    assert "have the same file name 'dummy.vmdk'" in process.stderr
+
+
+def test_same_image_twice():
+    """the same image can be used by more than one device, and is referenced once"""
+    yaml_text = cdrom_yaml("cdimage") + """
+    cdrom2:
+        type: cd_drive
+        parent: ide1
+        image: cd.iso
+"""
+    process, ovf = compose(yaml_text, output="out.ovf")
+    assert process.returncode == 0, process.stderr
+    hrefs = [f['@ovf:href'] for f in files(ovf)]
+    assert hrefs.count("cd.iso") == 1
+
+    process, _ = compose(yaml_text, output="out.ova")
+    assert process.returncode == 0, process.stderr
+
+
+@pytest.mark.parametrize("output", ["out.ovf", "out.ova"])
+def test_same_disk_image_twice(output):
+    """the same disk image can be used by more than one disk, it is referenced once"""
+    yaml_text = BASE_YAML.replace("disk_image: dummy.vmdk", "disk_image: dummy.vmdk\n        disk_id: disk1") + """
+    datadisk:
+        type: hard_disk
+        parent: sata1
+        disk_image: dummy.vmdk
+        disk_id: disk2
+"""
+    process, ovf = compose(yaml_text, output=output)
+    assert process.returncode == 0, process.stderr
+    if ovf is not None:
+        assert [f['@ovf:href'] for f in files(ovf)] == ["dummy.vmdk"]
+        file_id = files(ovf)[0]['@ovf:id']
+        assert {d['@ovf:fileRef'] for d in disks(ovf).values()} == {file_id}
+        assert set(disks(ovf).keys()) == {"disk1", "disk2"}

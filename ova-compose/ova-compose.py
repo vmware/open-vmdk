@@ -636,7 +636,7 @@ class OVFDisk(object):
         raise ValidationError(f"invalid units '{units}', must be one of {', '.join(cls.allocation_units_map)} or {', '.join(cls.allocation_factors)}")
 
 
-    def __init__(self, path, units=None, disk_id=None, file_id=None, raw_image=None, sector_size=None):
+    def __init__(self, path, units=None, disk_id=None, file_id=None, raw_image=None, sector_size=None, file=None):
         if disk_id is None:
             self.id = new_id(OVFDisk, "vmdisk")
         else:
@@ -658,7 +658,8 @@ class OVFDisk(object):
             else:
                 print(f"warning: raw image file {raw_image} does not exist, using {path}")
 
-        self.file = OVFFile(path, file_id=file_id)
+        # file is the OVFFile if the image is already used by another disk
+        self.file = file if file is not None else OVFFile(path, file_id=file_id)
         disk_info = OVF._disk_info(path)
         # round up, the disk must not be smaller than the image
         self.capacity = -(-disk_info['capacity'] // self.allocation_factors[self.units])
@@ -1061,25 +1062,42 @@ class OVF(object):
         OVFFile.reserved_ids = {str(hw['file_id']) for hw in hardware.values() if isinstance(hw, dict) and 'file_id' in hw}
         OVFDisk.reserved_ids = {str(hw['disk_id']) for hw in hardware.values() if isinstance(hw, dict) and 'disk_id' in hw}
 
+        # files used by more than one device (e.g. a CD image) are referenced once
+        files_by_path = {}
+
+        def known_file(path, file_id):
+            file = files_by_path.get(os.path.abspath(path))
+            if file is not None and file_id is not None and file_id != file.id:
+                # a different id for the same file, this will be reported below
+                return None
+            return file
+
         for hw_id, hw in hardware.items():
             if isinstance(hw, dict):
                 if 'image' in hw:
-                    file = OVFFile(hw['image'],
-                                   file_id=hw.get('file_id', None))
-                    files.append(file)
+                    file = known_file(hw['image'], hw.get('file_id', None))
+                    if file is None:
+                        file = OVFFile(hw['image'],
+                                       file_id=hw.get('file_id', None))
+                        files.append(file)
+                        files_by_path.setdefault(file.path, file)
                     hw['image'] = file
                 elif 'disk_image' in hw or 'raw_image' in hw:
                     if 'disk_image' not in hw:
                         # if vmdk file is unset, use the raw image name and replace the extension
                         hw['disk_image'] = os.path.splitext(hw['raw_image'])[0] + ".vmdk"
+                    file = known_file(hw['disk_image'], hw.get('file_id', None))
                     disk = OVFDisk(hw['disk_image'],
                                    units=hw.get('units', None),
                                    raw_image=hw.get('raw_image', None),
                                    disk_id=hw.get('disk_id', None),
                                    file_id=hw.get('file_id', None),
-                                   sector_size=hw.get('sector_size', None))
+                                   sector_size=hw.get('sector_size', None),
+                                   file=file)
                     disks.append(disk)
-                    files.append(disk.file)
+                    if file is None:
+                        files.append(disk.file)
+                        files_by_path.setdefault(disk.file.path, disk.file)
                     hw['disk'] = disk
                 elif 'disk_capacity' in hw:
                     disk = OVFEmptyDisk(hw['disk_capacity'],
@@ -1089,6 +1107,15 @@ class OVF(object):
                     hw['disk'] = disk
 
         hardware_config = hardware.get('config', {})
+
+        # files are referenced by their name in the OVF, the manifest and the OVA
+        names = {}
+        for file in files:
+            name = os.path.basename(file.path)
+            if name in names:
+                raise ValidationError(f"'{names[name].path}' and '{file.path}' have the same file name '{name}', "
+                                      "file names must be unique")
+            names[name] = file
 
         for kind, ids in [("file", [f.id for f in files]), ("disk", [d.id for d in disks])]:
             duplicates = sorted({str(id) for id in ids if ids.count(id) > 1})

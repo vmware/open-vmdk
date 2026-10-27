@@ -38,12 +38,15 @@ def test_envelope_configs(setup_test, get_configs):
     cfg_vmw_ovf = ovf['Envelope']['References']['File']
     cfg_vmw_ovf = cfg_vmw_ovf if isinstance(cfg_vmw_ovf, list) else [cfg_vmw_ovf]
 
-    j = 0
+    # each file is referenced once, even if it is used by more than one disk
+    hrefs = [f['@ovf:href'] for f in cfg_vmw_ovf]
+    assert len(hrefs) == len(set(hrefs)), f"duplicate file references {hrefs}"
+    files = {f['@ovf:href']: f for f in cfg_vmw_ovf}
+
     for key in cfg_hardware_section:
         if isinstance(cfg_hardware_section[key], dict):
             image_path = cfg_hardware_section[key].get('disk_image') or cfg_hardware_section[key].get('raw_image')
             if image_path:
                 image_path = image_path if image_path.endswith('.vmdk') else os.path.splitext(image_path)[0] + '.vmdk'
-                assert_values(image_path, cfg_vmw_ovf[j]['@ovf:href'])
-                assert_values(cfg_hardware_section[key].get('file_id'), cfg_vmw_ovf[j]['@ovf:id'])
-                j += 1
+                assert image_path in files, f"{image_path} not in references {hrefs}"
+                assert_values(cfg_hardware_section[key].get('file_id'), files[image_path]['@ovf:id'])
