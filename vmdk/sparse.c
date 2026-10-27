@@ -485,7 +485,7 @@ writeGrain(StreamOptimizedDiskInfo *sodi, GrainInfo *grain, uint64_t sp)
     }
 
     sodi->writer.gtInfo.gt[grain->bufferNr] = __cpu_to_le32(sp);
-    grainHdr->lba = grain->bufferNr * sodi->diskHdr.grainSize;
+    grainHdr->lba = __cpu_to_le64(grain->bufferNr * sodi->diskHdr.grainSize);
     grainHdr->cmpSize = __cpu_to_le32(dataLen - sizeof *grainHdr);
     rem = dataLen & (VMDK_SECTOR_SIZE - 1);
     if (rem != 0) {
