@@ -124,9 +124,12 @@ HW_CONFIG_NO_SECURE_BOOT = """
     ({}, HW_CONFIG_NO_SECURE_BOOT, "efi", "false"),
     # but system.secure_boot overrides it, like system.firmware does
     ({"secure_boot": "true"}, HW_CONFIG_NO_SECURE_BOOT, "efi", "true"),
-    # without defaults, secure boot is only set when given
-    ({"no_default_configs": "true"}, "", None, None),
-    ({"no_default_configs": "true", "secure_boot": "true"}, "", None, "true"),
+    # secure boot is enabled by default also without default configs, unless the firmware is bios
+    ({"no_default_configs": "true"}, "", None, "true"),
+    ({"no_default_configs": "true", "secure_boot": "false"}, "", None, "false"),
+    ({"no_default_configs": "true", "firmware": "bios"}, "", "bios", "false"),
+    # bios can also be set in hardware.config
+    ({}, "\n    config:\n        firmware: bios\n", "bios", "false"),
 ])
 def test_secure_boot(system, hw_config, firmware, secure_boot):
     process, ovf = compose(with_system(**system) + hw_config)

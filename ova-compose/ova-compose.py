@@ -1038,20 +1038,21 @@ class OVF(object):
                 raise ValidationError("os.firmware must be 'bios' or 'efi'")
             self.hardware_config['firmware'] = system.get('firmware', "efi")
 
-        # Like system.firmware, system.secure_boot overrides the defaults and
-        # hardware.config, but only if it is set.
+        # Secure boot is enabled by default, unless the firmware is bios, also
+        # with no_default_configs. Like system.firmware, system.secure_boot
+        # overrides hardware.config if it is set, otherwise an explicit
+        # hardware.config setting is used.
         secure_boot = system.get('secure_boot', None)
+        bios = self.hardware_config.get('firmware') == "bios"
         if secure_boot is not None:
             if type(secure_boot) is not bool:
                 raise ValidationError("os.secure_boot must be boolean")
-            self.hardware_config['bootOptions.efiSecureBootEnabled'] = "true" if secure_boot else "false"
-        if self.hardware_config.get('firmware') == "bios":
-            if secure_boot:
+            if secure_boot and bios:
                 raise ValidationError("os.secure_boot requires os.firmware 'efi'")
-            # secure boot is only possible with efi, so do not use the default for bios
-            if secure_boot is None and 'bootOptions.efiSecureBootEnabled' not in (hardware_config or {}):
-                if 'bootOptions.efiSecureBootEnabled' in self.hardware_config:
-                    self.hardware_config['bootOptions.efiSecureBootEnabled'] = "false"
+        elif 'bootOptions.efiSecureBootEnabled' not in (hardware_config or {}):
+            secure_boot = not bios
+        if secure_boot is not None:
+            self.hardware_config['bootOptions.efiSecureBootEnabled'] = "true" if secure_boot else "false"
         self.files = files
         self.disks = disks
         self.networks = networks
