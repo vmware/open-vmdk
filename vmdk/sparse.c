@@ -712,7 +712,10 @@ static void
         // Check if all work is done globally
         if (readPos >= capacity) {
             pthread_mutex_lock(&gtCtx->stateMutex);
-            gtCtx->state = GT_STATE_DONE;
+            /* another thread may have failed in the mean time, do not hide that */
+            if (gtCtx->state != GT_STATE_FAILED) {
+                gtCtx->state = GT_STATE_DONE;
+            }
             pthread_mutex_unlock(&gtCtx->stateMutex);
             pthread_mutex_unlock(&gtCtx->readPosMutex);
             break;
