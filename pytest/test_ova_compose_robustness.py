@@ -458,3 +458,22 @@ def test_no_transports():
     process, ovf = compose(BASE_YAML + "\nproduct:\n    product: P1\n")
     assert process.returncode == 0, process.stderr
     assert '@ovf:transport' not in ovf['Envelope']['VirtualSystem']['VirtualHardwareSection']
+
+
+def test_text_block_info():
+    """annotation and EULA have their own default Info, which can be overridden"""
+    yaml_text = BASE_YAML + """
+annotation:
+    text: an annotation
+eula:
+    text: a license
+"""
+    process, ovf = compose(yaml_text)
+    assert process.returncode == 0, process.stderr
+    vs = ovf['Envelope']['VirtualSystem']
+    assert vs['AnnotationSection']['Info'] == "Description of the Product"
+    assert vs['EulaSection']['Info'] == "End User License Agreement"
+
+    process, ovf = compose(yaml_text.replace("    text: a license\n", "    text: a license\n    info: My License\n"))
+    assert process.returncode == 0, process.stderr
+    assert ovf['Envelope']['VirtualSystem']['EulaSection']['Info'] == "My License"

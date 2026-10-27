@@ -860,13 +860,14 @@ class OVFProduct(object):
 class OVFTextBlock(object):
     # snake case will be converted to camel case in XML
     keys = ['info', 'text', 'file']
+    # the default info, subclasses have their own
+    info = "Information about the installed software"
     info_text = ""
     xml_name = "TextBlock"
     xml_text_name = "TextBlock"
 
 
     def __init__(self, **kwargs):
-        self.info = "Information about the installed software"
         self.__dict__.update((k, v) for k, v in kwargs.items() if k in self.keys)
         if hasattr(self, 'file'):
             file_name = self.file
