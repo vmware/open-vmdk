@@ -648,7 +648,8 @@ class OVFDisk(object):
 
         self.file = OVFFile(path, file_id=file_id)
         disk_info = OVF._disk_info(path)
-        self.capacity = int(disk_info['capacity'] / self.allocation_factors[self.units])
+        # round up, the disk must not be smaller than the image
+        self.capacity = -(-disk_info['capacity'] // self.allocation_factors[self.units])
         self.used = disk_info['used']
 
         if 'descriptorFile' in disk_info and 'ddb.logicalSectorSize' in disk_info['descriptorFile']:

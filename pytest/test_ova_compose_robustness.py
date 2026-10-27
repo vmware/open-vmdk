@@ -179,3 +179,22 @@ def test_empty_disk_invalid_units():
     process, _ = compose(empty_disk_yaml("furlongs"))
     assert process.returncode != 0
     assert "invalid units 'furlongs'" in process.stderr
+
+
+@pytest.mark.parametrize("units,expected", [
+    ("byte", 1536 * 1024),
+    ("KB", 1536),
+    # 1.5 MB must be rounded up
+    ("MB", 2),
+    ("GB", 1),
+])
+def test_disk_capacity_rounded_up(units, expected):
+    process = subprocess.run(["dd", "if=/dev/zero", "of=odd.img", "bs=1024", "count=1536"], cwd=WORK_DIR)
+    assert process.returncode == 0
+    process = subprocess.run([VMDK_CONVERT, "odd.img", "odd.vmdk"], cwd=WORK_DIR)
+    assert process.returncode == 0
+
+    yaml_text = BASE_YAML.replace("disk_image: dummy.vmdk", f"disk_image: odd.vmdk\n        units: {units}\n        disk_id: rootdisk")
+    process, ovf = compose(yaml_text)
+    assert process.returncode == 0, process.stderr
+    assert disks(ovf)['rootdisk']['@ovf:capacity'] == str(expected)
