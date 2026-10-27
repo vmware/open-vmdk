@@ -82,3 +82,40 @@ def test_gdgt_size_overflow():
     assert process.returncode == 0
     info = json.loads(process.stdout)
     assert info["capacity"] == os.path.getsize(path)
+
+
+def make_vmdk(name, data, args=[]):
+    """Write data to a raw image and convert it to a VMDK with the given name"""
+    raw_name = name + ".raw"
+    write_file(raw_name, data)
+    process = run_convert(args + [raw_name, name])
+    assert process.returncode == 0, process.stderr
+    return os.path.join(WORK_DIR, name)
+
+
+def replace_descriptor(path, descriptor):
+    """Overwrite the descriptor of a sparse VMDK in place"""
+    with open(path, "r+b") as f:
+        hdr = f.read(SECTOR_SIZE)
+        descriptor_offset, descriptor_size = struct.unpack_from("<QQ", hdr, 28)
+        assert len(descriptor) <= descriptor_size * SECTOR_SIZE
+        f.seek(descriptor_offset * SECTOR_SIZE)
+        f.write(descriptor + b"\0" * (descriptor_size * SECTOR_SIZE - len(descriptor)))
+
+
+def get_descriptor(name):
+    process = run_convert(["--get-descriptor", name])
+    assert process.returncode == 0
+    return process.stdout.encode()
+
+
+def test_descriptor_long_entry():
+    """a descriptor entry larger than twice the initial JSON buffer"""
+    path = make_vmdk("desc-long.vmdk", os.urandom(65536))
+    long_value = "V" * 5000
+    replace_descriptor(path, get_descriptor("desc-long.vmdk") + f'\nddb.comment = "{long_value}"\n'.encode())
+
+    process = run_convert(["-i", "--detailed", "desc-long.vmdk"])
+    assert process.returncode == 0
+    info = json.loads(process.stdout)
+    assert info["descriptorFile"]["ddb.comment"] == long_value

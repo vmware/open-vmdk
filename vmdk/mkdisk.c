@@ -222,7 +222,9 @@ parseDescriptorFile(const char *descriptor)
 
                     // Ensure we have enough space
                     if (result_size + entry_size > result_capacity) {
-                        result_capacity *= 2;
+                        while (result_size + entry_size > result_capacity) {
+                            result_capacity *= 2;
+                        }
                         char *new_result = realloc(result, result_capacity);
                         if (!new_result) {
                             free(result);
