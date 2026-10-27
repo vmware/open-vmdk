@@ -1527,8 +1527,10 @@ sparsePreadInflate(DiskInfo *self,
 
                     if (inflated < grainSize) {
                         /* Older versions of vmdk-convert did not pad the last grain to a full sector
-                           if the source size was not a multiple of the sector size. Accept that. */
-                        if (grainNr != sdi->gtInfo.lastGrainNr || grainSize - inflated >= VMDK_SECTOR_SIZE) {
+                           if the source size was not a multiple of the sector size. Accept that.
+                           Use GTEs - 1 for the final grain: if the capacity is a multiple of the grain
+                           size, lastGrainNr is one past it. */
+                        if (grainNr != sdi->gtInfo.GTEs - 1 || grainSize - inflated >= VMDK_SECTOR_SIZE) {
                             return -1;
                         }
                         memset(grainBuf + inflated, 0, grainSize - inflated);

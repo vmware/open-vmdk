@@ -193,15 +193,21 @@ def test_size_not_sector_aligned(size, threads):
     assert back[size:] == b"\0" * (len(back) - size)
 
 
-def test_last_grain_not_padded():
+# sizes of the source images, including one where the capacity (in sectors,
+# rounded up) is a multiple of the grain size
+@pytest.mark.parametrize("size", [1000, 65535, 65536 + 1000])
+def test_last_grain_not_padded(size):
     """VMDKs created by older versions have a last grain that is not padded to a full sector"""
-    data = os.urandom(1000)
-    write_file("unpadded.vmdk", stream_optimized(2, {0: data}))
+    grain_bytes = 128 * SECTOR_SIZE
+    data = os.urandom(size)
+    grains = {i // grain_bytes: data[i:i + grain_bytes] for i in range(0, size, grain_bytes)}
+    capacity = -(-size // SECTOR_SIZE)
+    write_file("unpadded.vmdk", stream_optimized(capacity, grains))
 
     process = run_convert(["unpadded.vmdk", "unpadded-back.raw"])
     assert process.returncode == 0, process.stderr
     with open(os.path.join(WORK_DIR, "unpadded-back.raw"), "rb") as f:
-        assert f.read() == data + b"\0" * 24
+        assert f.read() == data + b"\0" * (capacity * SECTOR_SIZE - size)
 
 
 def test_grain_too_short():
