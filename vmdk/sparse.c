@@ -1411,22 +1411,18 @@ SparseNextData(DiskInfo *self,
 }
 
 static ssize_t
-SparsePread(DiskInfo *self,
-            void *buf,
-            size_t len,
-            off_t pos)
+sparsePreadInflate(DiskInfo *self,
+                   z_stream *zstream,
+                   void *buf,
+                   size_t len,
+                   off_t pos)
 {
     SparseDiskInfo *sdi = getSDI(self);
     uint8_t *buf8 = buf;
     uint8_t grainBuf[sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE];
     uint8_t readBuf[(sdi->diskHdr.grainSize + 1) * VMDK_SECTOR_SIZE];
-    z_stream zstream = {0};
     uint32_t grainNr = pos / (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE);
     uint32_t readSkip = pos & (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE - 1);
-
-    if (inflateInit(&zstream) != Z_OK) {
-        return -1;
-    }
 
     while (len > 0) {
         uint32_t readLen;
@@ -1483,15 +1479,15 @@ SparsePread(DiskInfo *self,
                         return -1;
                     }
                 }
-                zstream.next_in = readBuf + hdrlen;
-                zstream.avail_in = cmpSize;
-                zstream.next_out = grainBuf;
-                zstream.avail_out = sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE;
-                if (inflate(&zstream, Z_FINISH) != Z_STREAM_END) {
+                zstream->next_in = readBuf + hdrlen;
+                zstream->avail_in = cmpSize;
+                zstream->next_out = grainBuf;
+                zstream->avail_out = sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE;
+                if (inflate(zstream, Z_FINISH) != Z_STREAM_END) {
                     return -1;
                 }
                 {
-                    uint32_t inflated = sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE - zstream.avail_out;
+                    uint32_t inflated = sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE - zstream->avail_out;
 
                     if (inflated < grainSize) {
                         /* Older versions of vmdk-convert did not pad the last grain to a full sector
@@ -1514,12 +1510,29 @@ SparsePread(DiskInfo *self,
         grainNr++;
         readSkip = 0;
         if (len > 0) {
-            if (inflateReset(&zstream) != Z_OK) {
+            if (inflateReset(zstream) != Z_OK) {
                 return -1;
             }
         }
     }
     return buf8 - (uint8_t *)buf;
+}
+
+static ssize_t
+SparsePread(DiskInfo *self,
+            void *buf,
+            size_t len,
+            off_t pos)
+{
+    z_stream zstream = {0};
+    ssize_t ret;
+
+    if (inflateInit(&zstream) != Z_OK) {
+        return -1;
+    }
+    ret = sparsePreadInflate(self, &zstream, buf, len, pos);
+    inflateEnd(&zstream);
+    return ret;
 }
 
 static int
