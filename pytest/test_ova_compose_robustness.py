@@ -425,3 +425,11 @@ configurations:
     process, _ = compose(yaml_text)
     assert process.returncode != 0
     assert "default_configuration 'large' is not in configurations" in process.stderr
+
+
+def test_network_without_description():
+    process, ovf = compose(BASE_YAML.replace('        description: "The VM Network"\n', ''))
+    assert process.returncode == 0, process.stderr
+    network = ovf['Envelope']['NetworkSection']['Network']
+    assert network['@ovf:name'] == "VM Network"
+    assert network['Description'] == "The VM Network Network"

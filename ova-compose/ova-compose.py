@@ -553,13 +553,14 @@ class RasdEthernet(RasdItem):
 
 class OVFNetwork(object):
 
-    def __init__(self, name, description):
+    def __init__(self, name, description=None):
         self.name = name
 
 
     @classmethod
     def from_dict(cls, d):
-        item = cls(d['name'], d['description'])
+        # the description is optional, and not used (the description in the OVF is generated from the name)
+        item = cls(d['name'], d.get('description'))
         return item
 
 
