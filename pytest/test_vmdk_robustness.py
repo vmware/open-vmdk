@@ -19,6 +19,7 @@ import os
 import pytest
 import struct
 import subprocess
+import zlib
 
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -45,6 +46,40 @@ def sparse_header(capacity, grain_size, descriptor_offset, descriptor_size,
                       num_gtes_per_gt, 0, gd_offset, overhead,
                       0, b"\n \r\n", 1)
     return hdr + b"\0" * (SECTOR_SIZE - len(hdr))
+
+
+def stream_optimized(capacity, grains, grain_size=128):
+    """Return a minimal stream optimized VMDK without descriptor.
+       grains is a dict of grain number -> uncompressed grain data"""
+    num_gtes_per_gt = 512
+    num_gtes = -(-capacity // grain_size)
+    num_gts = -(-num_gtes // num_gtes_per_gt)
+    gd_sectors = -(-num_gts * 4 // SECTOR_SIZE)
+    gt_sectors = num_gtes_per_gt * 4 // SECTOR_SIZE
+
+    gd_offset = 1
+    gt_offset = gd_offset + gd_sectors
+    overhead = gt_offset + gt_sectors * num_gts
+    gd = [gt_offset + i * gt_sectors for i in range(num_gts)]
+    gt = [0] * (num_gts * num_gtes_per_gt)
+
+    data = b""
+    sector = overhead
+    for grain_nr, grain in sorted(grains.items()):
+        cmp = zlib.compress(grain)
+        blob = struct.pack("<QI", grain_nr * grain_size, len(cmp)) + cmp
+        blob += b"\0" * (-len(blob) % SECTOR_SIZE)
+        gt[grain_nr] = sector
+        sector += len(blob) // SECTOR_SIZE
+        data += blob
+
+    hdr = sparse_header(capacity, grain_size, 0, 0, num_gtes_per_gt, gd_offset, overhead=overhead)
+    gd_data = struct.pack(f"<{num_gts}I", *gd)
+    gd_data += b"\0" * (gd_sectors * SECTOR_SIZE - len(gd_data))
+    gt_data = struct.pack(f"<{len(gt)}I", *gt)
+    # end of stream marker
+    eos = b"\0" * SECTOR_SIZE
+    return hdr + gd_data + gt_data + data + eos
 
 
 def run_convert(args, **kwargs):
@@ -137,3 +172,39 @@ def test_partial_last_grain(size):
     assert process.returncode == 0
     with open(os.path.join(WORK_DIR, "partial-back.raw"), "rb") as f:
         assert f.read() == data
+
+
+@pytest.mark.parametrize("threads", ["1", "4"])
+@pytest.mark.parametrize("size", [1000, 65536 + 1000])
+def test_size_not_sector_aligned(size, threads):
+    """the raw image size is not a multiple of the sector size"""
+    data = os.urandom(size)
+    make_vmdk("unaligned.vmdk", data, args=["-n", threads])
+
+    process = run_convert(["unaligned.vmdk", "unaligned-back.raw"])
+    assert process.returncode == 0, process.stderr
+    with open(os.path.join(WORK_DIR, "unaligned-back.raw"), "rb") as f:
+        back = f.read()
+    # the capacity is rounded up to full sectors
+    assert len(back) == -(-size // SECTOR_SIZE) * SECTOR_SIZE
+    assert back[:size] == data
+    assert back[size:] == b"\0" * (len(back) - size)
+
+
+def test_last_grain_not_padded():
+    """VMDKs created by older versions have a last grain that is not padded to a full sector"""
+    data = os.urandom(1000)
+    write_file("unpadded.vmdk", stream_optimized(2, {0: data}))
+
+    process = run_convert(["unpadded.vmdk", "unpadded-back.raw"])
+    assert process.returncode == 0, process.stderr
+    with open(os.path.join(WORK_DIR, "unpadded-back.raw"), "rb") as f:
+        assert f.read() == data + b"\0" * 24
+
+
+def test_grain_too_short():
+    """a grain that is shorter than the grain size, not only by padding, is an error"""
+    write_file("short-grain.vmdk", stream_optimized(256, {0: os.urandom(65536 - 512)}))
+
+    process = run_convert(["short-grain.vmdk", "short-grain-back.raw"])
+    assert process.returncode != 0

@@ -736,10 +736,13 @@ static void
         if (gtCtx->src->vmt->pread(gtCtx->src, grain.buffer, readLen, readPos) != (ssize_t)readLen) {
             goto fail;
         }
-        grain.bufferValidEnd = readLen;
+        /* The capacity in the header is in sectors, so the last grain must be
+           padded to a full sector if the source size is not a multiple of it. */
+        grain.bufferValidEnd = CEILING(readLen, VMDK_SECTOR_SIZE) * VMDK_SECTOR_SIZE;
+        memset(grain.buffer + readLen, 0, grain.bufferValidEnd - readLen);
 
         // Process non-zero data
-        if (!isZeroed(grain.buffer, readLen)) {
+        if (!isZeroed(grain.buffer, grain.bufferValidEnd)) {
             uint32_t sp;
             if (deflateGrain(&grain) < 0) {
                 goto fail;
@@ -1487,8 +1490,17 @@ SparsePread(DiskInfo *self,
                 if (inflate(&zstream, Z_FINISH) != Z_STREAM_END) {
                     return -1;
                 }
-                if (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE - zstream.avail_out < grainSize) {
-                    return -1;
+                {
+                    uint32_t inflated = sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE - zstream.avail_out;
+
+                    if (inflated < grainSize) {
+                        /* Older versions of vmdk-convert did not pad the last grain to a full sector
+                           if the source size was not a multiple of the sector size. Accept that. */
+                        if (grainNr != sdi->gtInfo.lastGrainNr || grainSize - inflated >= VMDK_SECTOR_SIZE) {
+                            return -1;
+                        }
+                        memset(grainBuf + inflated, 0, grainSize - inflated);
+                    }
                 }
                 memcpy(buf8, grainBuf + readSkip, readLen);
             } else {
