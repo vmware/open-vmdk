@@ -263,3 +263,54 @@ def test_sign_script_braces(rsa_key):
     process, _ = compose(BASE_YAML, args=["--sign-format", "p7s", "--sign-script", script])
     assert process.returncode != 0
     assert "literal braces must be doubled" in process.stderr
+
+
+def files(ovf):
+    return as_list(ovf['Envelope']['References'].get('File'))
+
+
+def cdrom_yaml(file_id, image="cd.iso"):
+    with open(os.path.join(WORK_DIR, image), "wb") as f:
+        f.write(b"\0" * 2048)
+    return BASE_YAML + f"""
+    ide1:
+        type: ide_controller
+    cdrom1:
+        type: cd_drive
+        parent: ide1
+        image: {image}
+        file_id: {file_id}
+"""
+
+
+def test_explicit_file_id_not_generated():
+    """an explicit file id must not collide with a generated one"""
+    process, ovf = compose(cdrom_yaml("file0"))
+    assert process.returncode == 0, process.stderr
+    ids = [f['@ovf:id'] for f in files(ovf)]
+    assert sorted(ids) == sorted(set(ids)), f"duplicate file ids {ids}"
+    assert "file0" in ids
+
+
+def test_explicit_disk_id_not_generated():
+    """an explicit disk id must not collide with a generated one"""
+    yaml_text = BASE_YAML + """
+    datadisk:
+        type: hard_disk
+        parent: sata1
+        disk_capacity: 10
+        disk_id: vmdisk0
+"""
+    process, ovf = compose(yaml_text)
+    assert process.returncode == 0, process.stderr
+    ids = [d['@ovf:diskId'] for d in as_list(ovf['Envelope']['DiskSection']['Disk'])]
+    assert len(ids) == 2
+    assert len(set(ids)) == 2, f"duplicate disk ids {ids}"
+    assert "vmdisk0" in ids
+
+
+def test_duplicate_explicit_ids():
+    yaml_text = BASE_YAML.replace("disk_image: dummy.vmdk", "disk_image: dummy.vmdk\n        file_id: same")
+    process, _ = compose(cdrom_yaml("same").replace(BASE_YAML, yaml_text))
+    assert process.returncode != 0
+    assert "duplicate file id(s): same" in process.stderr

@@ -566,14 +566,24 @@ class OVFNetwork(object):
         return item
 
 
+def new_id(cls, prefix):
+    """Return the next generated id for cls, skipping the ids set explicitly in the config"""
+    while True:
+        id = f"{prefix}{cls.next_id}"
+        cls.next_id += 1
+        if id not in cls.reserved_ids:
+            return id
+
+
 class OVFFile(object):
     next_id = 0
+    # ids set explicitly in the config, these are not generated
+    reserved_ids = set()
 
     def __init__(self, path, file_id=None):
         self.path = os.path.abspath(path)
         if file_id is None:
-            self.id = f"file{OVFFile.next_id}"
-            OVFFile.next_id += 1
+            self.id = new_id(OVFFile, "file")
         else:
             self.id = file_id
         self.size = os.path.getsize(self.path)
@@ -593,6 +603,8 @@ class OVFFile(object):
 
 class OVFDisk(object):
     next_id = 0
+    # ids set explicitly in the config, these are not generated
+    reserved_ids = set()
 
     allocation_units_map = {
             'byte' : "byte",
@@ -626,8 +638,7 @@ class OVFDisk(object):
 
     def __init__(self, path, units=None, disk_id=None, file_id=None, raw_image=None, sector_size=None):
         if disk_id is None:
-            self.id = f"vmdisk{OVFDisk.next_id}"
-            OVFDisk.next_id += 1
+            self.id = new_id(OVFDisk, "vmdisk")
         else:
             self.id = disk_id
 
@@ -682,8 +693,7 @@ class OVFEmptyDisk(OVFDisk):
 
     def __init__(self, capacity, units=None, disk_id=None):
         if disk_id is None:
-            self.id = f"vmdisk{OVFDisk.next_id}"
-            OVFDisk.next_id += 1
+            self.id = new_id(OVFDisk, "vmdisk")
         else:
             self.id = disk_id
         self.capacity = capacity
@@ -1046,6 +1056,11 @@ class OVF(object):
         assert 'hardware' in config, "config needs a 'hardware' section"
 
         hardware = config['hardware']
+
+        # do not generate ids that are set explicitly
+        OVFFile.reserved_ids = {str(hw['file_id']) for hw in hardware.values() if isinstance(hw, dict) and 'file_id' in hw}
+        OVFDisk.reserved_ids = {str(hw['disk_id']) for hw in hardware.values() if isinstance(hw, dict) and 'disk_id' in hw}
+
         for hw_id, hw in hardware.items():
             if isinstance(hw, dict):
                 if 'image' in hw:
@@ -1074,6 +1089,11 @@ class OVF(object):
                     hw['disk'] = disk
 
         hardware_config = hardware.get('config', {})
+
+        for kind, ids in [("file", [f.id for f in files]), ("disk", [d.id for d in disks])]:
+            duplicates = sorted({str(id) for id in ids if ids.count(id) > 1})
+            if duplicates:
+                raise ValidationError(f"duplicate {kind} id(s): {', '.join(duplicates)}")
 
         networks = {}
         if 'networks' in config:
