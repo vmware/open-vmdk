@@ -609,6 +609,20 @@ class OVFDisk(object):
             'byte * 2^40' : 2 ** 40,
     }
 
+    @classmethod
+    def _units(cls, units, default):
+        # units can be unspecified (default),
+        # one of KB, MB, ...
+        # or byte * 2^10, ... with exponents 10-40
+        if units is None:
+            units = default
+        if units in cls.allocation_units_map:
+            return cls.allocation_units_map[units]
+        if units in cls.allocation_factors:
+            return units
+        raise ValidationError(f"invalid units '{units}', must be one of {', '.join(cls.allocation_units_map)} or {', '.join(cls.allocation_factors)}")
+
+
     def __init__(self, path, units=None, disk_id=None, file_id=None, raw_image=None, sector_size=None):
         if disk_id is None:
             self.id = f"vmdisk{OVFDisk.next_id}"
@@ -616,18 +630,7 @@ class OVFDisk(object):
         else:
             self.id = disk_id
 
-        # units can be unspecified (default: byte),
-        # one of KB, MB, ...
-        # or byte * 2^10, ... with exponents 10-40
-        if units is None:
-            units = "byte"
-        elif units in self.allocation_units_map:
-            units = self.allocation_units_map[units]
-        elif units in self.allocation_factors:
-            pass
-        else:
-            assert False, "invalid units used"
-        self.units = units
+        self.units = self._units(units, "byte")
 
         self.sector_size = int(sector_size) if sector_size is not None else None
 
@@ -675,16 +678,15 @@ class OVFDisk(object):
 
 class OVFEmptyDisk(OVFDisk):
 
-    def __init__(self, capacity, units="MB", disk_id=None):
+    def __init__(self, capacity, units=None, disk_id=None):
         if disk_id is None:
             self.id = f"vmdisk{OVFDisk.next_id}"
             OVFDisk.next_id += 1
         else:
             self.id = disk_id
         self.capacity = capacity
-        if units in self.allocation_units_map:
-            units = self.allocation_units_map[units]
-        self.units = units
+        # for empty disks, the default is MB
+        self.units = self._units(units, "MB")
         self.sector_size = None
 
     def xml_item(self):
@@ -1064,6 +1066,7 @@ class OVF(object):
                     hw['disk'] = disk
                 elif 'disk_capacity' in hw:
                     disk = OVFEmptyDisk(hw['disk_capacity'],
+                                        units=hw.get('units', None),
                                         disk_id=hw.get('disk_id', None))
                     disks.append(disk)
                     hw['disk'] = disk

@@ -144,3 +144,38 @@ def test_secure_boot_invalid(system):
     process, _ = compose(with_system(**system))
     assert process.returncode != 0
     assert "secure_boot" in process.stderr
+
+
+def disks(ovf):
+    return {d['@ovf:diskId']: d for d in as_list(ovf['Envelope']['DiskSection'].get('Disk'))}
+
+
+def empty_disk_yaml(units=None):
+    units_line = f"        units: {units}\n" if units is not None else ""
+    return BASE_YAML + f"""
+    datadisk:
+        type: hard_disk
+        parent: sata1
+        disk_capacity: 10
+        disk_id: datadisk
+{units_line}"""
+
+
+@pytest.mark.parametrize("units,expected", [
+    (None, "byte * 2^20"),
+    ("GB", "byte * 2^30"),
+    ("KB", "byte * 2^10"),
+    ('"byte * 2^40"', "byte * 2^40"),
+])
+def test_empty_disk_units(units, expected):
+    process, ovf = compose(empty_disk_yaml(units))
+    assert process.returncode == 0, process.stderr
+    disk = disks(ovf)['datadisk']
+    assert disk['@ovf:capacity'] == "10"
+    assert disk['@ovf:capacityAllocationUnits'] == expected
+
+
+def test_empty_disk_invalid_units():
+    process, _ = compose(empty_disk_yaml("furlongs"))
+    assert process.returncode != 0
+    assert "invalid units 'furlongs'" in process.stderr
