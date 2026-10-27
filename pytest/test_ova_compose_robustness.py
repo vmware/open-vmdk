@@ -237,3 +237,29 @@ def test_sign_script_relative_paths(rsa_key, output):
         assert os.path.isfile(os.path.join(WORK_DIR, output, "out-dir.p7s"))
     else:
         assert os.path.isfile(os.path.join(WORK_DIR, "out.p7s"))
+
+
+@pytest.mark.parametrize("output", ["my vm.ova", "my vm.ovf", "x$(touch pwned).ovf"])
+def test_sign_script_quoting(rsa_key, output):
+    """file names are quoted for the shell running the sign script"""
+    script = f"{SIGN_P7S} -a {{sign_alg}} {{mf_file}} {{p7s_file}} {rsa_key}"
+    process, _ = compose(BASE_YAML, output=output, args=["--sign-format", "p7s", "--sign-script", script])
+    assert process.returncode == 0, process.stderr
+    assert not os.path.exists(os.path.join(WORK_DIR, "pwned"))
+    if output.endswith(".ova"):
+        members = subprocess.check_output(["tar", "tf", output], cwd=WORK_DIR, text=True).splitlines()
+        assert members[:3] == ["my vm.ovf", "my vm.mf", "my vm.p7s"]
+    else:
+        assert os.path.isfile(os.path.join(WORK_DIR, output[:-len(".ovf")] + ".p7s"))
+
+
+def test_sign_script_braces(rsa_key):
+    """literal braces must be doubled, and give a clear error if they are not"""
+    script = f"K={rsa_key} ; {SIGN_P7S} -a {{sign_alg}} {{mf_file}} {{p7s_file}} ${{{{K}}}}"
+    process, _ = compose(BASE_YAML, args=["--sign-format", "p7s", "--sign-script", script])
+    assert process.returncode == 0, process.stderr
+
+    script = f"K={rsa_key} ; {SIGN_P7S} -a {{sign_alg}} {{mf_file}} {{p7s_file}} ${{K}}"
+    process, _ = compose(BASE_YAML, args=["--sign-format", "p7s", "--sign-script", script])
+    assert process.returncode != 0
+    assert "literal braces must be doubled" in process.stderr

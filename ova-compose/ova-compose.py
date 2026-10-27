@@ -23,6 +23,7 @@ import json
 from lxml import etree as ET
 import hashlib
 import tempfile
+import shlex
 import shutil
 from concurrent.futures import ProcessPoolExecutor
 
@@ -1372,10 +1373,22 @@ class OVF(object):
         # The script runs in cwd (the directory ova-compose was started in), not in the
         # temporary directory for ova and dir output, so that relative paths in the
         # script work. So pass the files with absolute paths.
-        script = script_format.format(ovf_file=os.path.abspath(ovf_file), mf_file=os.path.abspath(mf_file),
-                                      sign_alg=sign_alg,
-                                      cert_file=os.path.abspath(cert_file), p7s_file=os.path.abspath(p7s_file),
-                                      keyfile=keyfile)
+        values = {
+            'ovf_file': os.path.abspath(ovf_file),
+            'mf_file': os.path.abspath(mf_file),
+            'sign_alg': sign_alg,
+            'cert_file': os.path.abspath(cert_file),
+            'p7s_file': os.path.abspath(p7s_file),
+            'keyfile': keyfile,
+        }
+        # the script is run by the shell, so quote the values (e.g. file names with spaces)
+        values = {k: shlex.quote(str(v)) for k, v in values.items()}
+        try:
+            script = script_format.format(**values)
+        except (KeyError, IndexError, ValueError) as e:
+            raise ValidationError(f"invalid --sign-script '{script_format}': {type(e).__name__}: {e}. "
+                                  f"Valid placeholders are {', '.join('{' + k + '}' for k in values)}, "
+                                  "literal braces must be doubled ('{{' and '}}').")
         subprocess.check_call(script, shell=True, cwd=cwd)
 
         sign_files = []
@@ -1440,6 +1453,8 @@ def usage():
     print("    - {keyfile}: the path to the keyfile")
     print("    These arguments will be set by the ova-compose tool and passed to the script.")
     print("    The file arguments are absolute paths. The script runs in the current directory.")
+    print("    The values are quoted for the shell, so the placeholders must not be quoted in the script.")
+    print("    Literal braces in the script must be doubled ('{{' and '}}').")
     print("    It is expected that the script signs the file given by {mf_file} and writes the signature to {cert_file}.")
     print("    Refer to the DMTF DSP0243 specification for more details on the signature format.")
     print("    With --sign-format p7s, the script is expected to write a DER encoded, detached CMS SignedData (RFC 5652)")
