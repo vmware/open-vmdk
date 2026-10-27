@@ -82,7 +82,7 @@ copyDisk(DiskInfo *src, DiskInfo *dst, int numThreads)
 
         ret = dst->vmt->copyDisk(src, dst, numThreads);
         if (ret < 0) {
-            return false;
+            goto failAll;
         }
     } else {
         off_t end = 0;
@@ -521,6 +521,7 @@ main(int argc,
                     printf("Success\n");
                 } else {
                     fprintf(stderr, "Failure!\n");
+                    di->vmt->close(di);
                     exit(1);
                 }
             }

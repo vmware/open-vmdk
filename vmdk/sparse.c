@@ -1807,6 +1807,7 @@ Sparse_Open(const char *fileName)
     return &sdi->hdr;
 
 failDF:
+    free(sdi->gtInfo.gd);
 failSdi:
     free(sdi);
 failFd:
