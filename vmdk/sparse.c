@@ -655,6 +655,8 @@ failDeflate:
     deflateEnd(&grain->zstream);
 failGrainBuffer:
     free(grain->buffer);
+    /* callers may still call freeGrain() */
+    grain->buffer = NULL;
 fail:
     return false;
 }
@@ -1302,7 +1304,9 @@ StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLeve
     sodi->diskHdr.overHead += sodi->writer.gtInfo.GDsectors;
     sodi->diskHdr.overHead = prefillGD(&sodi->writer.gtInfo, sodi->diskHdr.overHead);
 
-    initGrain(sodi, &sodi->writer.currentGrain);
+    if (!initGrain(sodi, &sodi->writer.currentGrain)) {
+        goto failFd;
+    }
 
     sodi->writer.curSP = sodi->diskHdr.overHead;
     if (lseek(sodi->writer.fd, sodi->writer.curSP * VMDK_SECTOR_SIZE, SEEK_SET) == -1) {
@@ -1311,7 +1315,9 @@ StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLeve
     return &sodi->hdr;
 
 failAll:
-    free(sodi->writer.currentGrain.zlibBuffer.data);
+    freeGrain(&sodi->writer.currentGrain);
+failFd:
+    close(sodi->writer.fd);
 failGDGT:
     free(sodi->writer.gtInfo.gd);
 failFileName:
