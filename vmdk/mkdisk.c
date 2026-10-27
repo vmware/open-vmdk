@@ -486,7 +486,7 @@ main(int argc,
             }
             capacity = di->vmt->getCapacity(di);
 
-            if (strcmp(&(filename[strlen(filename) - 5]), ".vmdk") == 0)
+            if (strlen(filename) >= 5 && strcmp(&(filename[strlen(filename) - 5]), ".vmdk") == 0)
                 tgt = StreamOptimized_Create(filename, capacity, compressionLevel, doReorder, sectorSize);
             else
                 tgt = Flat_Create(filename, capacity);
