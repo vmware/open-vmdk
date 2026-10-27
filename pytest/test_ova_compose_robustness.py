@@ -198,3 +198,42 @@ def test_disk_capacity_rounded_up(units, expected):
     process, ovf = compose(yaml_text)
     assert process.returncode == 0, process.stderr
     assert disks(ovf)['rootdisk']['@ovf:capacity'] == str(expected)
+
+
+SIGN_P7S = os.path.join(THIS_DIR, "..", "ova-compose", "sign-p7s.sh")
+
+
+@pytest.fixture(scope='module')
+def rsa_key():
+    """an RSA key and certificate in one PEM file, in WORK_DIR"""
+    if shutil.which("openssl") is None:
+        pytest.skip("openssl not installed")
+    process = subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                              "-subj", "/CN=ova-compose-test", "-keyout", "key.pem", "-out", "cert.pem"],
+                             cwd=WORK_DIR, capture_output=True)
+    assert process.returncode == 0, process.stderr
+    with open(os.path.join(WORK_DIR, "rsa.pem"), "w") as fout:
+        for name in ["key.pem", "cert.pem"]:
+            with open(os.path.join(WORK_DIR, name)) as fin:
+                fout.write(fin.read())
+    return "rsa.pem"
+
+
+@pytest.mark.parametrize("output", ["out.ovf", "out.ova", "out-dir"])
+def test_sign_script_relative_paths(rsa_key, output):
+    """relative paths in the sign script are relative to the directory ova-compose runs in"""
+    # the key is given relative to the working directory, as in the example in sign-p7s.sh
+    script = f"{SIGN_P7S} -a {{sign_alg}} {{mf_file}} {{p7s_file}} {rsa_key}"
+    args = ["--sign-format", "p7s", "--sign-script", script]
+    if output == "out-dir":
+        args += ["--format", "dir"]
+    process, _ = compose(BASE_YAML, output=output, args=args)
+    assert process.returncode == 0, process.stderr
+
+    if output == "out.ova":
+        members = subprocess.check_output(["tar", "tf", output], cwd=WORK_DIR, text=True).split()
+        assert members[:3] == ["out.ovf", "out.mf", "out.p7s"]
+    elif output == "out-dir":
+        assert os.path.isfile(os.path.join(WORK_DIR, output, "out-dir.p7s"))
+    else:
+        assert os.path.isfile(os.path.join(WORK_DIR, "out.p7s"))

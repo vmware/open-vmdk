@@ -1361,7 +1361,7 @@ class OVF(object):
         assert "signatureAlgorithm:" in process.stdout, f"signature file {p7s_file} contains no signer"
 
 
-    def sign_manifest_external(self, keyfile, script_format, ovf_file=None, mf_file=None, sign_alg="sha512", sign_format="cert"):
+    def sign_manifest_external(self, keyfile, script_format, ovf_file=None, mf_file=None, sign_alg="sha512", sign_format="cert", cwd=None):
         if ovf_file == None:
             ovf_file = f"{self.name}.ovf"
         if mf_file == None:
@@ -1369,8 +1369,14 @@ class OVF(object):
         cert_file = os.path.splitext(ovf_file)[0] + ".cert"
         p7s_file = os.path.splitext(ovf_file)[0] + ".p7s"
 
-        script = script_format.format(ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg, cert_file=cert_file, p7s_file=p7s_file, keyfile=keyfile)
-        subprocess.check_call(script, shell=True)
+        # The script runs in cwd (the directory ova-compose was started in), not in the
+        # temporary directory for ova and dir output, so that relative paths in the
+        # script work. So pass the files with absolute paths.
+        script = script_format.format(ovf_file=os.path.abspath(ovf_file), mf_file=os.path.abspath(mf_file),
+                                      sign_alg=sign_alg,
+                                      cert_file=os.path.abspath(cert_file), p7s_file=os.path.abspath(p7s_file),
+                                      keyfile=keyfile)
+        subprocess.check_call(script, shell=True, cwd=cwd)
 
         sign_files = []
         if sign_format in ["cert", "both"]:
@@ -1385,14 +1391,14 @@ class OVF(object):
         return sign_files
 
 
-    def sign_package(self, keyfile, script_format, ovf_file=None, mf_file=None, sign_alg="sha512", sign_format="cert"):
+    def sign_package(self, keyfile, script_format, ovf_file=None, mf_file=None, sign_alg="sha512", sign_format="cert", cwd=None):
         if ovf_file is None:
             ovf_file = f"{self.name}.ovf"
         if script_format is None:
             self.sign_manifest(keyfile, ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg)
             return [os.path.splitext(ovf_file)[0] + ".cert"]
         return self.sign_manifest_external(keyfile, script_format, ovf_file=ovf_file, mf_file=mf_file,
-                                           sign_alg=sign_alg, sign_format=sign_format)
+                                           sign_alg=sign_alg, sign_format=sign_format, cwd=cwd)
 
 
 def usage():
@@ -1433,6 +1439,7 @@ def usage():
     print("    - {p7s_file}: the path to the CMS signature file")
     print("    - {keyfile}: the path to the keyfile")
     print("    These arguments will be set by the ova-compose tool and passed to the script.")
+    print("    The file arguments are absolute paths. The script runs in the current directory.")
     print("    It is expected that the script signs the file given by {mf_file} and writes the signature to {cert_file}.")
     print("    Refer to the DMTF DSP0243 specification for more details on the signature format.")
     print("    With --sign-format p7s, the script is expected to write a DER encoded, detached CMS SignedData (RFC 5652)")
@@ -1615,7 +1622,7 @@ def main():
             sign_files = []
             if sign_keyfile is not None or sign_script is not None:
                 sign_files = ovf.sign_package(sign_keyfile, sign_script, ovf_file=ovf_file, mf_file=mf_file,
-                                              sign_alg=sign_alg, sign_format=sign_format)
+                                              sign_alg=sign_alg, sign_format=sign_format, cwd=pwd)
 
             # order: ovf, manifest, signature files, then the disks and other files
             all_files = [ovf_file, mf_file] + sign_files + disk_files
