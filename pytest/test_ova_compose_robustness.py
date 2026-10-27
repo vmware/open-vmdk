@@ -366,3 +366,40 @@ def test_same_disk_image_twice(output):
         file_id = files(ovf)[0]['@ovf:id']
         assert {d['@ovf:fileRef'] for d in disks(ovf).values()} == {file_id}
         assert set(disks(ovf).keys()) == {"disk1", "disk2"}
+
+
+NON_STRING_PRODUCT = """
+product:
+    product: Robustness
+    vendor: Broadcom
+    version: 5
+    full_version: 5.1
+    required: false
+    instance: 1
+    transports:
+        - iso
+    properties:
+        port:
+            type: uint16
+            value: 80
+            qualifiers: 0
+            label: 8080
+            description: 42
+            user_configurable: true
+"""
+
+
+def test_non_string_values():
+    """numbers and booleans in the config are written as strings"""
+    process, ovf = compose(BASE_YAML + NON_STRING_PRODUCT)
+    assert process.returncode == 0, process.stderr
+    product = ovf['Envelope']['VirtualSystem']['ProductSection']
+    assert product['Version'] == "5"
+    assert product['FullVersion'] == "5.1"
+    assert product['@ovf:required'] == "false"
+    assert product['@ovf:instance'] == "1"
+    prop = product['Property']
+    assert prop['@ovf:value'] == "80"
+    assert prop['@ovf:qualifiers'] == "0"
+    assert prop['Label'] == "8080"
+    assert prop['Description'] == "42"

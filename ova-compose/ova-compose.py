@@ -65,17 +65,23 @@ def xml_indent(elem, level=0):
         elem.tail = i
 
 
+def xml_value(value):
+    """Convert a value from the YAML config (e.g. a number or a boolean) to a string for XML"""
+    if value is None or type(value) is str:
+        return value
+    if type(value) is bool:
+        return "true" if value else "false"
+    return str(value)
+
+
 def xml_text_element(tag, value):
     elem = ET.Element(tag)
-    elem.text = value
+    elem.text = xml_value(value)
     return elem
 
 
 def xml_config(key, value):
-    if type(value) is bool:
-        value = "true" if value else "false"
-    elif type(value) is not str:
-        value = str(value)
+    value = xml_value(value)
     return ET.Element('{%s}Config' % NS_VMW, { '{%s}required' % NS_OVF: 'false', '{%s}key' % NS_VMW: key, '{%s}value' % NS_VMW: value})
 
 
@@ -744,8 +750,8 @@ class OVFProperty(object):
 
     def xml_item(self):
         xml_attrs = {
-            '{%s}key' % NS_OVF: self.key,
-            '{%s}type' % NS_OVF: self.type
+            '{%s}key' % NS_OVF: xml_value(self.key),
+            '{%s}type' % NS_OVF: xml_value(self.type)
         }
 
         # Handle the default value for the property
@@ -760,11 +766,11 @@ class OVFProperty(object):
 
         # Add other standard attributes
         if self.qualifiers is not None:
-            xml_attrs['{%s}qualifiers' % NS_OVF] = self.qualifiers
+            xml_attrs['{%s}qualifiers' % NS_OVF] = xml_value(self.qualifiers)
         if self.user_configurable:
             xml_attrs['{%s}userConfigurable' % NS_OVF] = "true"
         if self.configuration is not None:
-            xml_attrs['{%s}configuration' % NS_OVF] = self.configuration
+            xml_attrs['{%s}configuration' % NS_OVF] = xml_value(self.configuration)
         if self.password:
             xml_attrs['{%s}password' % NS_OVF] = "true"
         if self.required is not None:
@@ -827,7 +833,7 @@ class OVFProduct(object):
         xml_attrs = {}
         for k in self.attr_keys:
             if hasattr(self, k) and getattr(self, k) is not None:
-                xml_attrs['{%s}%s' % (NS_OVF, k)] = getattr(self, k)
+                xml_attrs['{%s}%s' % (NS_OVF, k)] = xml_value(getattr(self, k))
         xml_product = ET.Element('{%s}ProductSection' % NS_OVF, xml_attrs)
 
         for k in self.keys:
