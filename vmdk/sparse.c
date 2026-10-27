@@ -62,7 +62,7 @@ typedef struct GrainInfo {
 
 typedef struct SparseVmdkWriter {
     SparseGTInfo gtInfo;
-    uint32_t curSP;
+    uint64_t curSP; /* 64 bit, so that exceeding the 32 bit limit of grain table entries can be detected */
     GrainInfo currentGrain;
     int fd;
     char *fileName;
@@ -462,7 +462,7 @@ deflateGrain(GrainInfo *grain)
 }
 
 static ssize_t
-writeGrain(StreamOptimizedDiskInfo *sodi, GrainInfo *grain, uint32_t sp)
+writeGrain(StreamOptimizedDiskInfo *sodi, GrainInfo *grain, uint64_t sp)
 {
     size_t dataLen;
     uint32_t rem;
@@ -476,9 +476,15 @@ writeGrain(StreamOptimizedDiskInfo *sodi, GrainInfo *grain, uint32_t sp)
         return -1;
     }
 
-    sodi->writer.gtInfo.gt[grain->bufferNr] = __cpu_to_le32(sp);
-
     dataLen = grain->zstream.next_out - grain->zlibBuffer.data;
+
+    /* grain table entries are 32 bit sector numbers */
+    if (sp + CEILING(dataLen, VMDK_SECTOR_SIZE) > UINT32_MAX) {
+        fprintf(stderr, "VMDK file too large, the compressed data must be less than 2TB\n");
+        return -1;
+    }
+
+    sodi->writer.gtInfo.gt[grain->bufferNr] = __cpu_to_le32(sp);
     grainHdr->lba = grain->bufferNr * sodi->diskHdr.grainSize;
     grainHdr->cmpSize = __cpu_to_le32(dataLen - sizeof *grainHdr);
     rem = dataLen & (VMDK_SECTOR_SIZE - 1);
@@ -748,7 +754,7 @@ static void
 
         // Process non-zero data
         if (!isZeroed(grain.buffer, grain.bufferValidEnd)) {
-            uint32_t sp;
+            uint64_t sp;
             if (deflateGrain(&grain) < 0) {
                 goto fail;
             }
@@ -1306,6 +1312,10 @@ StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLeve
     sodi->diskHdr.gdOffset = sodi->diskHdr.overHead;
     sodi->diskHdr.overHead += sodi->writer.gtInfo.GDsectors;
     sodi->diskHdr.overHead = prefillGD(&sodi->writer.gtInfo, sodi->diskHdr.overHead);
+    /* grain directory entries are 32 bit sector numbers */
+    if (sodi->diskHdr.overHead > UINT32_MAX) {
+        goto failFd;
+    }
 
     if (!initGrain(sodi, &sodi->writer.currentGrain)) {
         goto failFd;
