@@ -165,6 +165,28 @@ parseNumber(const char *text, long min, long max, long *value)
     return true;
 }
 
+/* Append src to the string dst as JSON string content, with escaping.
+   dst must have room for 6 * strlen(src) more characters. */
+static void
+jsonEscapeCat(char *dst, const char *src)
+{
+    char *p = dst + strlen(dst);
+
+    for (; *src; src++) {
+        unsigned char c = *src;
+
+        if (c == '"' || c == '\\') {
+            *p++ = '\\';
+            *p++ = c;
+        } else if (c < 0x20) {
+            p += sprintf(p, "\\u%04x", c);
+        } else {
+            *p++ = c;
+        }
+    }
+    *p = '\0';
+}
+
 /* Parse the descriptor file and return a JSON string with the key-value pairs */
 static char *
 parseDescriptorFile(const char *descriptor)
@@ -240,7 +262,8 @@ parseDescriptorFile(const char *descriptor)
                 // Add the key-value pair to the result
                 if (strlen(key) > 0) {
                     // Calculate the required space for this entry
-                    size_t entry_size = strlen(key) + strlen(value) + 10; // 10 for quotes, colon, comma, etc.
+                    // each character may need up to 6 characters when escaped
+                    size_t entry_size = 6 * (strlen(key) + strlen(value)) + 10; // 10 for quotes, colon, comma, etc.
 
                     // Ensure we have enough space
                     if (result_size + entry_size > result_capacity) {
@@ -269,9 +292,9 @@ parseDescriptorFile(const char *descriptor)
 
                     // Add the key-value pair
                     strcat(result, "\"");
-                    strcat(result, key);
+                    jsonEscapeCat(result, key);
                     strcat(result, "\": \"");
-                    strcat(result, value);
+                    jsonEscapeCat(result, value);
                     strcat(result, "\"");
                     strcat(result, "}");
 

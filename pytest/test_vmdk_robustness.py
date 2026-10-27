@@ -273,3 +273,15 @@ def test_fuse_read_error():
         assert e.value.errno == errno.EIO
     finally:
         subprocess.run(["fusermount", "-u", mounted], cwd=WORK_DIR, check=True)
+
+
+def test_descriptor_json_escape():
+    """quotes, backslashes and control characters in the descriptor must be escaped in the JSON output"""
+    path = make_vmdk("desc-escape.vmdk", os.urandom(65536))
+    value = 'say "hi"\\there\tnow'
+    replace_descriptor(path, get_descriptor("desc-escape.vmdk") + f'\nddb.comment = "{value}"\n'.encode())
+
+    process = run_convert(["-i", "--detailed", "desc-escape.vmdk"])
+    assert process.returncode == 0
+    info = json.loads(process.stdout)
+    assert info["descriptorFile"]["ddb.comment"] == value
