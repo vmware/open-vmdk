@@ -14,6 +14,7 @@
 # Tests for vmdk-convert with malformed and unusual input. These do not need
 # any downloads.
 
+import errno
 import json
 import os
 import pytest
@@ -24,6 +25,7 @@ import zlib
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 VMDK_CONVERT = os.path.join(THIS_DIR, "..", "build", "vmdk", "vmdk-convert")
+VMDK_FUSE = os.path.join(THIS_DIR, "..", "build", "vmdk", "vmdk-fuse")
 WORK_DIR = os.path.join(os.getcwd(), "pytest-vmdk-robustness")
 
 SECTOR_SIZE = 512
@@ -247,3 +249,27 @@ def test_valid_options(args):
     write_file("options.raw", os.urandom(65536))
     process = run_convert(args + ["options.raw", "options.vmdk"])
     assert process.returncode == 0, process.stderr
+
+
+@pytest.mark.skipif(not os.path.exists(VMDK_FUSE), reason="vmdk-fuse not built")
+def test_fuse_read_error():
+    """reading a corrupt grain must fail with EIO, not look like EOF"""
+    vmdk = bytearray(stream_optimized(256, {0: os.urandom(65536), 1: os.urandom(65536)}))
+    # the first grain starts after header, grain directory and grain table
+    grain0 = 6 * SECTOR_SIZE
+    cmp_size = struct.unpack_from("<I", vmdk, grain0 + 8)[0]
+    grain1 = grain0 + -(-(12 + cmp_size) // SECTOR_SIZE) * SECTOR_SIZE
+    # corrupt the compressed data of the second grain
+    vmdk[grain1 + 12:grain1 + SECTOR_SIZE] = b"\x55" * (SECTOR_SIZE - 12)
+    write_file("fuse-corrupt.vmdk", vmdk)
+
+    mounted = write_file("fuse-corrupt.img", b"")
+    process = subprocess.run([VMDK_FUSE, "--file=fuse-corrupt.vmdk", mounted], cwd=WORK_DIR, timeout=TIMEOUT)
+    assert process.returncode == 0
+    try:
+        with pytest.raises(OSError) as e:
+            with open(mounted, "rb") as f:
+                f.read()
+        assert e.value.errno == errno.EIO
+    finally:
+        subprocess.run(["fusermount", "-u", mounted], cwd=WORK_DIR, check=True)

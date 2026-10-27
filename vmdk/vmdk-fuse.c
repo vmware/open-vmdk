@@ -137,9 +137,13 @@ static int vmdk_read(const char *path, char *buf, size_t size,
         return -EINVAL;  // Invalid buffer
 
     ssize_t ret;
+    errno = 0;
     if ((ret = di->vmt->pread(di, (void *)buf, size, offset)) < 0) {
-        fprintf(stderr, "pread failed: %d (%s)\n", errno, strerror(errno));
-        return -errno;  // Return the actual error from pread
+        /* errno is not set for invalid data, and 0 would be reported as success (EOF) */
+        int err = errno ? errno : EIO;
+
+        fprintf(stderr, "pread failed: %d (%s)\n", err, strerror(err));
+        return -err;  // Return the actual error from pread
     }
 
     return ret;
