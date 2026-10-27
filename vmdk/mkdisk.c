@@ -165,12 +165,14 @@ parseNumber(const char *text, long min, long max, long *value)
     return true;
 }
 
-/* Append src to the string dst as JSON string content, with escaping.
-   dst must have room for 6 * strlen(src) more characters. */
-static void
-jsonEscapeCat(char *dst, const char *src)
+/* Write src to dst as JSON string content, with escaping, and return the
+   number of characters written (without null termination).
+   dst must have room for 6 * strlen(src) characters. */
+static size_t
+jsonEscape(char *dst, const char *src)
 {
-    char *p = dst + strlen(dst);
+    static const char hex[] = "0123456789abcdef";
+    char *p = dst;
 
     for (; *src; src++) {
         unsigned char c = *src;
@@ -179,12 +181,17 @@ jsonEscapeCat(char *dst, const char *src)
             *p++ = '\\';
             *p++ = c;
         } else if (c < 0x20) {
-            p += sprintf(p, "\\u%04x", c);
+            *p++ = '\\';
+            *p++ = 'u';
+            *p++ = '0';
+            *p++ = '0';
+            *p++ = hex[c >> 4];
+            *p++ = hex[c & 0xf];
         } else {
             *p++ = c;
         }
     }
-    *p = '\0';
+    return p - dst;
 }
 
 /* Parse the descriptor file and return a JSON string with the key-value pairs */
@@ -279,27 +286,30 @@ parseDescriptorFile(const char *descriptor)
                         result = new_result;
                     }
 
-                    // Insert before the closing brace
-                    result[result_size - 1] = '\0'; // Remove closing brace
+                    // Insert before the closing brace. Append at the known end of the
+                    // result instead of using strcat(), which would be O(n^2).
+                    char *p = result + result_size - 1;
 
                     // Add comma if not the first entry
                     if (!first_entry) {
-                        strcat(result, ", ");
-                        result_size += 2;
+                        memcpy(p, ", ", 2);
+                        p += 2;
                     } else {
                         first_entry = false;
                     }
 
                     // Add the key-value pair
-                    strcat(result, "\"");
-                    jsonEscapeCat(result, key);
-                    strcat(result, "\": \"");
-                    jsonEscapeCat(result, value);
-                    strcat(result, "\"");
-                    strcat(result, "}");
+                    *p++ = '"';
+                    p += jsonEscape(p, key);
+                    memcpy(p, "\": \"", 4);
+                    p += 4;
+                    p += jsonEscape(p, value);
+                    *p++ = '"';
+                    *p++ = '}';
+                    *p = '\0';
 
                     // Update result_size
-                    result_size = strlen(result);
+                    result_size = p - result;
                 }
             }
         }

@@ -85,9 +85,9 @@ def stream_optimized(capacity, grains, grain_size=128):
 
 
 def run_convert(args, **kwargs):
+    kwargs.setdefault("timeout", TIMEOUT)
     process = subprocess.run([VMDK_CONVERT] + args, cwd=WORK_DIR,
-                             capture_output=True, text=True,
-                             timeout=TIMEOUT, **kwargs)
+                             capture_output=True, text=True, **kwargs)
     # a negative return code means that we were killed by a signal (crash)
     assert process.returncode >= 0, f"vmdk-convert crashed with signal {-process.returncode}: {process.stderr}"
     return process
@@ -285,3 +285,23 @@ def test_descriptor_json_escape():
     assert process.returncode == 0
     info = json.loads(process.stdout)
     assert info["descriptorFile"]["ddb.comment"] == value
+
+
+def test_descriptor_many_entries():
+    """parsing a large descriptor with many entries must not be quadratic"""
+    num_entries = 200000
+    descriptor = "".join(f"k{i} = \"v{i}\"\n" for i in range(num_entries)).encode()
+    descriptor += b"\0" * (-len(descriptor) % SECTOR_SIZE)
+    descriptor_sectors = len(descriptor) // SECTOR_SIZE
+
+    # header, descriptor, grain directory (with no grain table, so the disk is empty)
+    gd_offset = 1 + descriptor_sectors
+    data = sparse_header(128, 128, 1, descriptor_sectors, 512, gd_offset, overhead=gd_offset + 1)
+    data += descriptor + b"\0" * SECTOR_SIZE
+    write_file("desc-many.vmdk", data)
+
+    process = run_convert(["-i", "--detailed", "desc-many.vmdk"], timeout=30)
+    assert process.returncode == 0
+    info = json.loads(process.stdout)
+    assert len(info["descriptorFile"]) == num_entries
+    assert info["descriptorFile"][f"k{num_entries - 1}"] == f"v{num_entries - 1}"
