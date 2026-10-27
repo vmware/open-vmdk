@@ -515,3 +515,19 @@ def test_controller_limits(controller_type, maximum):
     process, _ = compose(controller_yaml(controller_type, maximum + 1))
     assert process.returncode != 0
     assert f"the maximum is {maximum}" in process.stderr
+
+
+def test_sign_p7s_no_partial_files(rsa_key):
+    """sign-p7s.sh does not leave partial signature files if signing fails"""
+    with open(os.path.join(WORK_DIR, "partial.mf"), "w") as f:
+        f.write("SHA256(partial.ovf)= 00\n")
+    for name in ["partial.p7s", "partial.cert"]:
+        if os.path.exists(os.path.join(WORK_DIR, name)):
+            os.remove(os.path.join(WORK_DIR, name))
+
+    # the second signer does not exist, so openssl cms fails
+    process = subprocess.run([SIGN_P7S, "-a", "sha256", "-c", "partial.cert", "partial.mf", "partial.p7s",
+                              rsa_key, "does-not-exist.pem"], cwd=WORK_DIR, capture_output=True, text=True)
+    assert process.returncode != 0
+    leftovers = [f for f in os.listdir(WORK_DIR) if f.startswith("partial.") and f != "partial.mf"]
+    assert leftovers == []
