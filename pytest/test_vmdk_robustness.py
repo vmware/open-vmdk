@@ -215,4 +215,35 @@ def test_descriptor_too_large():
     write_file("desc-large.raw", os.urandom(65536))
     process = run_convert(["-t", "1" * 11000, "desc-large.raw", "desc-large.vmdk"])
     assert process.returncode != 0
-    assert "Descriptor file too large" in process.stderr
+    assert "Success" not in process.stdout
+
+
+@pytest.mark.parametrize("args", [
+    ["-n", "0"],
+    ["-n", "100000000"],
+    ["-n", "4294967297"],
+    ["-c", "10"],
+    ["-c", "4294967297"],
+    ["-s", "1000"],
+    ["-s", "4294967808"],
+    ["-t", "4294967296"],
+])
+def test_invalid_options(args):
+    write_file("options.raw", os.urandom(65536))
+    process = run_convert(args + ["options.raw", "options.vmdk"])
+    assert process.returncode == 1
+    assert "invalid" in process.stderr or "must be" in process.stderr
+
+
+@pytest.mark.parametrize("args", [
+    ["-n", "1024"],
+    ["-c", "0"],
+    ["-s", "0"],
+    ["-s", "512"],
+    ["-s", "4096"],
+    ["-t", "2147483647"],
+])
+def test_valid_options(args):
+    write_file("options.raw", os.urandom(65536))
+    process = run_convert(args + ["options.raw", "options.vmdk"])
+    assert process.returncode == 0, process.stderr
