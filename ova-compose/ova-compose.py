@@ -259,10 +259,15 @@ class RasdMemory(RasdItem):
 
 
 class RasdController(RasdItem):
+    # maximum number of devices, None for no limit
+    max_children = None
+    # addresses that cannot be used by devices
+    reserved_addresses = ()
 
     def __init__(self, subtype, config=None):
         super().__init__(config=config)
         self.next_child_address = 0
+        self.num_children = 0
         self.subtype = subtype
 
 
@@ -273,13 +278,20 @@ class RasdController(RasdItem):
 
 
     def add_child(self, child):
+        if self.max_children is not None and self.num_children >= self.max_children:
+            raise ValidationError(f"too many devices for the {self.description}, the maximum is {self.max_children}")
+        while self.next_child_address in self.reserved_addresses:
+            self.next_child_address += 1
         child.address_on_parent = self.next_child_address
         self.next_child_address += 1
+        self.num_children += 1
 
 
 class RasdScsiController(RasdController):
     resource_type = 6
     description = "SCSI Controller"
+    # unit 7 is used by the controller itself
+    reserved_addresses = (7,)
 
 
     def __init__(self, subtype, config=None):
@@ -308,6 +320,7 @@ class RasdScsiController(RasdController):
 class RasdSataController(RasdController):
     resource_type = 20
     description = "SATA Controller"
+    max_children = 30
 
 
     def xml_item(self, required, element_name):
@@ -332,6 +345,8 @@ class RasdNvmeController(RasdController):
 class RasdIdeController(RasdController):
     resource_type = 5
     description = "IDE Controller"
+    # master and slave
+    max_children = 2
 
 
 class RasdControllerItem(RasdItem):

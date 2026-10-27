@@ -477,3 +477,41 @@ eula:
     process, ovf = compose(yaml_text.replace("    text: a license\n", "    text: a license\n    info: My License\n"))
     assert process.returncode == 0, process.stderr
     assert ovf['Envelope']['VirtualSystem']['EulaSection']['Info'] == "My License"
+
+
+def controller_yaml(controller_type, num_disks):
+    yaml_text = BASE_YAML + f"""
+    ctrl1:
+        type: {controller_type}
+"""
+    for i in range(num_disks):
+        yaml_text += f"""
+    disk{i}:
+        type: hard_disk
+        parent: ctrl1
+        disk_capacity: 10
+"""
+    return yaml_text
+
+
+def addresses_on(ovf, controller):
+    items = as_list(ovf['Envelope']['VirtualSystem']['VirtualHardwareSection']['Item'])
+    instance_id = next(i['rasd:InstanceID'] for i in items if i['rasd:ElementName'] == controller)
+    return [int(i['rasd:AddressOnParent']) for i in items if i.get('rasd:Parent') == instance_id]
+
+
+def test_scsi_unit_7_skipped():
+    process, ovf = compose(controller_yaml("scsi_controller", 9))
+    assert process.returncode == 0, process.stderr
+    assert addresses_on(ovf, "ctrl1") == [0, 1, 2, 3, 4, 5, 6, 8, 9]
+
+
+@pytest.mark.parametrize("controller_type,maximum", [("ide_controller", 2), ("sata_controller", 30)])
+def test_controller_limits(controller_type, maximum):
+    process, ovf = compose(controller_yaml(controller_type, maximum))
+    assert process.returncode == 0, process.stderr
+    assert addresses_on(ovf, "ctrl1") == list(range(maximum))
+
+    process, _ = compose(controller_yaml(controller_type, maximum + 1))
+    assert process.returncode != 0
+    assert f"the maximum is {maximum}" in process.stderr
