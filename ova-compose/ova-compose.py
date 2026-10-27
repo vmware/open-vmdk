@@ -921,6 +921,10 @@ class OVFConfiguration(object):
         self.default = False
         self.info = "Information about the installed software"
         self.__dict__.update((k, v) for k, v in kwargs.items() if k in self.keys)
+        # both are required by the OVF schema
+        for k in ['label', 'description']:
+            if getattr(self, k, None) is None:
+                raise ValidationError(f"configuration '{id}' needs a '{k}'")
 
 
     @classmethod
@@ -1044,6 +1048,8 @@ class OVF(object):
 
         if 'default_configuration' in system:
             dflt_cfg = system['default_configuration']
+            if dflt_cfg not in self.configurations:
+                raise ValidationError(f"default_configuration '{dflt_cfg}' is not in configurations")
             self.configurations[dflt_cfg].default = True
 
         self.connect()

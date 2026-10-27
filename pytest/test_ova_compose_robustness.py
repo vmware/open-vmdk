@@ -403,3 +403,25 @@ def test_non_string_values():
     assert prop['@ovf:qualifiers'] == "0"
     assert prop['Label'] == "8080"
     assert prop['Description'] == "42"
+
+
+@pytest.mark.parametrize("configuration,error", [
+    ("        label: Small\n", "configuration 'small' needs a 'description'"),
+    ("        description: A small one\n", "configuration 'small' needs a 'label'"),
+])
+def test_configuration_incomplete(configuration, error):
+    process, _ = compose(BASE_YAML + "\nconfigurations:\n    small:\n" + configuration)
+    assert process.returncode != 0
+    assert error in process.stderr
+
+
+def test_default_configuration_unknown():
+    yaml_text = with_system(default_configuration="large") + """
+configurations:
+    small:
+        label: Small
+        description: A small one
+"""
+    process, _ = compose(yaml_text)
+    assert process.returncode != 0
+    assert "default_configuration 'large' is not in configurations" in process.stderr
