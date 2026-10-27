@@ -297,13 +297,25 @@ getGDGT(SparseGTInfo *gtInfo,
 
     {
         uint64_t GTEs = gtInfo->lastGrainNr + (gtInfo->lastGrainSize != 0);
-        /* Number of GTEs must be less than 2^32.  Actually capacity must be less than 2^32 (2TB) for everything except streamOptimized format... */
-        uint32_t GTs = CEILING(GTEs, hdr->numGTEsPerGT);
-        uint32_t GDsectors = CEILING(GTs * sizeof(uint32_t), VMDK_SECTOR_SIZE);
-        uint32_t GTsectors = CEILING(hdr->numGTEsPerGT * sizeof(uint32_t), VMDK_SECTOR_SIZE);
-        uint32_t *gd = calloc(GDsectors + GTsectors * GTs, VMDK_SECTOR_SIZE);
+        uint64_t GTs;
+        uint64_t GDsectors;
+        uint64_t GTsectors;
+        uint32_t *gd;
         uint32_t *gt;
 
+        /* Number of GTEs must be less than 2^32.  Actually capacity must be less than 2^32 (2TB) for everything except streamOptimized format...
+           Grain numbers are handled as uint32_t, and all metadata sizes (in sectors) must fit into uint32_t as well.
+           All computations are done in 64 bit so that values from an untrusted header cannot wrap around. */
+        if (GTEs > UINT32_MAX) {
+            return false;
+        }
+        GTs = CEILING(GTEs, (uint64_t)hdr->numGTEsPerGT);
+        GDsectors = CEILING(GTs * sizeof(uint32_t), VMDK_SECTOR_SIZE);
+        GTsectors = CEILING((uint64_t)hdr->numGTEsPerGT * sizeof(uint32_t), VMDK_SECTOR_SIZE);
+        if (GDsectors + GTsectors * GTs > UINT32_MAX) {
+            return false;
+        }
+        gd = calloc(GDsectors + GTsectors * GTs, VMDK_SECTOR_SIZE);
         if (!gd) {
             return false;
         }
