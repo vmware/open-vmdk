@@ -433,3 +433,28 @@ def test_network_without_description():
     network = ovf['Envelope']['NetworkSection']['Network']
     assert network['@ovf:name'] == "VM Network"
     assert network['Description'] == "The VM Network Network"
+
+
+def transport_yaml(transports):
+    """two product sections, the second one with the transports in reverse order"""
+    yaml_text = BASE_YAML + "\nproduct_sections:\n"
+    for name, product_transports in [("P1", transports), ("P2", list(reversed(transports)))]:
+        yaml_text += f"    - product: {name}\n      transports:\n"
+        yaml_text += "".join(f"          - {t}\n" for t in product_transports)
+    return yaml_text
+
+
+def test_transports_ordered():
+    """the transports are in the order of the config, so the output is reproducible"""
+    for _ in range(5):
+        process, ovf = compose(transport_yaml(["iso", "com.vmware.guestInfo"]))
+        assert process.returncode == 0, process.stderr
+        hw = ovf['Envelope']['VirtualSystem']['VirtualHardwareSection']
+        assert hw['@ovf:transport'] == "iso com.vmware.guestInfo"
+
+
+def test_no_transports():
+    """no empty transport attribute if there are no transports"""
+    process, ovf = compose(BASE_YAML + "\nproduct:\n    product: P1\n")
+    assert process.returncode == 0, process.stderr
+    assert '@ovf:transport' not in ovf['Envelope']['VirtualSystem']['VirtualHardwareSection']

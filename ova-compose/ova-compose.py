@@ -1286,8 +1286,10 @@ class OVF(object):
             for p in self.products:
                 if p.transports:
                     transports.extend(p.transports)
-            transports = list(set(transports))
-            hw_attrs = {'{%s}transport' % NS_OVF: " ".join(transports)}
+            # remove duplicates, but keep the order so that the output is reproducible
+            transports = list(dict.fromkeys(transports))
+            if transports:
+                hw_attrs = {'{%s}transport' % NS_OVF: " ".join(transports)}
 
         hw = ET.Element('{%s}VirtualHardwareSection' % NS_OVF, hw_attrs)
 
