@@ -221,8 +221,10 @@ def test_grain_too_short():
 def test_descriptor_too_large():
     """the descriptor must fit into the space reserved for it"""
     write_file("desc-large.raw", os.urandom(65536))
-    process = run_convert(["-t", "1" * 11000, "desc-large.raw", "desc-large.vmdk"])
+    # leading zeros pass the range check of -t, but are written to the descriptor as given
+    process = run_convert(["-t", "0" * 11000 + "1", "desc-large.raw", "desc-large.vmdk"])
     assert process.returncode != 0
+    assert "Descriptor file too large" in process.stderr
     assert "Success" not in process.stdout
 
 
