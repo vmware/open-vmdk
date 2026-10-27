@@ -119,3 +119,21 @@ def test_descriptor_long_entry():
     assert process.returncode == 0
     info = json.loads(process.stdout)
     assert info["descriptorFile"]["ddb.comment"] == long_value
+
+
+@pytest.mark.parametrize("size", [102400, 65536 + 512, 512])
+def test_partial_last_grain(size):
+    """capacity is not a multiple of the grain size (64k), and the last grain has data"""
+    data = os.urandom(size)
+    make_vmdk("partial.vmdk", data)
+
+    process = run_convert(["-i", "partial.vmdk"])
+    assert process.returncode == 0
+    info = json.loads(process.stdout)
+    assert info["capacity"] == size
+    assert info["used"] == size
+
+    process = run_convert(["partial.vmdk", "partial-back.raw"])
+    assert process.returncode == 0
+    with open(os.path.join(WORK_DIR, "partial-back.raw"), "rb") as f:
+        assert f.read() == data

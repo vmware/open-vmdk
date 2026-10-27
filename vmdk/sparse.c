@@ -1379,6 +1379,12 @@ SparseNextData(DiskInfo *self,
     uint32_t skip = p & (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE - 1);
     bool want = false;
 
+    /* The last grain may be partial, so p can be within a grain that has data, but past the end of the disk. */
+    if (p >= SparseGetCapacity(self)) {
+        errno = ENXIO;
+        return -1;
+    }
+
     while (grainNr < sdi->gtInfo.GTEs) {
         bool empty = sdi->gtInfo.gt[grainNr] == __cpu_to_le32(0);
 
