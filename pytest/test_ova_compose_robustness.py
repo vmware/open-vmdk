@@ -15,6 +15,7 @@
 
 import os
 import pytest
+import shlex
 import shutil
 import subprocess
 import xmltodict
@@ -576,6 +577,42 @@ def test_scsi_controller_limits(subtype, system_type, maximum):
     process, _ = compose(config(maximum + 1))
     assert process.returncode != 0
     assert f"the maximum is {maximum}" in process.stderr
+
+
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("fail_on", [None, "cert", "p7s"])
+def test_sign_p7s_publish_rollback(rsa_key, tmp_path, existing, fail_on):
+    """A failed publish restores old signatures or removes newly published ones."""
+    (tmp_path / "publish.mf").write_text("SHA256(publish.ovf)= 00\n")
+    originals = {"cert": b"old certificate", "p7s": b"old CMS signature"}
+    if existing:
+        for suffix, contents in originals.items():
+            (tmp_path / f"publish.{suffix}").write_bytes(contents)
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    mv = bin_dir / "mv"
+    mv.write_text("#!/bin/bash\n" + (
+        f'for arg in "$@"; do\n'
+        f'    if [ "$arg" = "publish.{fail_on}.tmp" ]; then exit 1; fi\n'
+        f'done\n' if fail_on else ""
+    ) + f'exec {shlex.quote(shutil.which("mv"))} "$@"\n')
+    mv.chmod(0o755)
+    env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ['PATH'])
+    process = subprocess.run([SIGN_P7S, "-c", "publish.cert", "publish.mf", "publish.p7s",
+                              os.path.join(WORK_DIR, rsa_key)],
+                             cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert (process.returncode == 0) == (fail_on is None), process.stderr
+    for suffix, contents in originals.items():
+        path = tmp_path / f"publish.{suffix}"
+        if fail_on is None:
+            assert path.read_bytes() != contents
+        elif existing:
+            assert path.read_bytes() == contents
+        else:
+            assert not path.exists()
+    assert not list(tmp_path.glob("*.tmp"))
+    assert not list(tmp_path.glob("*.backup.*"))
 
 
 def test_sign_p7s_no_partial_files(rsa_key):
