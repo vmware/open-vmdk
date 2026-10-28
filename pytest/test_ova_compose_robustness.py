@@ -546,6 +546,38 @@ def test_controller_limits(controller_type, maximum):
     assert f"the maximum is {maximum}" in process.stderr
 
 
+@pytest.mark.parametrize("subtype,system_type,maximum", [
+    ("buslogic", "vmx-20", 15),
+    ("lsilogic", "vmx-20", 15),
+    ("lsilogicas", "vmx-20", 15),
+    ("VirtualSCSI", "vmx-13", 15),
+    ("VirtualSCSI", "vmx-14", 64),
+    ("virtualscsi", "vmx-20", 64),
+    (None, "vmx-20", 64),
+    (None, "vmx-14 vmx-20", 64),
+    (None, "vmx-13 vmx-20", 15),
+    (None, "other-platform", 15),
+])
+def test_scsi_controller_limits(subtype, system_type, maximum):
+    def config(num_disks):
+        yaml_text = controller_yaml("scsi_controller", num_disks)
+        yaml_text = yaml_text.replace("type: vmx-20", f"type: {system_type}")
+        # Put the controller after its children to exercise order independence.
+        controller = "    ctrl1:\n        type: scsi_controller\n"
+        yaml_text = yaml_text.replace(controller, "") + controller
+        if subtype is not None:
+            yaml_text += f"        subtype: {subtype}\n"
+        return yaml_text
+
+    process, ovf = compose(config(maximum))
+    assert process.returncode == 0, process.stderr
+    assert addresses_on(ovf, "ctrl1") == [i for i in range(maximum + 1) if i != 7]
+
+    process, _ = compose(config(maximum + 1))
+    assert process.returncode != 0
+    assert f"the maximum is {maximum}" in process.stderr
+
+
 def test_sign_p7s_no_partial_files(rsa_key):
     """sign-p7s.sh does not leave partial signature files if signing fails"""
     with open(os.path.join(WORK_DIR, "partial.mf"), "w") as f:

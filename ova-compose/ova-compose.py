@@ -290,6 +290,7 @@ class RasdController(RasdItem):
 class RasdScsiController(RasdController):
     resource_type = 6
     description = "SCSI Controller"
+    max_children = 15
     # unit 7 is used by the controller itself
     reserved_addresses = (7,)
 
@@ -308,6 +309,16 @@ class RasdScsiController(RasdController):
                 self.subtype = subtype.lower()
         else:
             raise Exception(f"invalid SCSI subtype '{self.subtype}'")
+
+
+    def set_hardware_limits(self, system_type):
+        # PVSCSI supports 64 disks with HWv14 and later, plus the controller
+        # at unit 7. Every advertised hardware version must support the disks.
+        types = str(system_type).split()
+        supports_64 = bool(types) and all(
+            t.startswith('vmx-') and t[4:].isdigit() and int(t[4:]) >= 14
+            for t in types)
+        self.max_children = 64 if self.subtype == 'VirtualSCSI' and supports_64 else 15
 
 
     def xml_item(self, required, element_name):
@@ -1255,6 +1266,11 @@ class OVF(object):
 
 
     def connect(self):
+        # Set limits before attaching children, which may precede their parent
+        # in the configuration.
+        for rasd_item in self.rasd_items.values():
+            if isinstance(rasd_item, RasdScsiController):
+                rasd_item.set_hardware_limits(self.vssd_system.type)
         for hw_id, rasd_item in self.rasd_items.items():
             rasd_item.connect(self)
 
