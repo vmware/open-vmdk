@@ -1092,23 +1092,33 @@ class OVF(object):
         OVFFile.reserved_ids = {str(hw['file_id']) for hw in hardware.values() if isinstance(hw, dict) and 'file_id' in hw}
         OVFDisk.reserved_ids = {str(hw['disk_id']) for hw in hardware.values() if isinstance(hw, dict) and 'disk_id' in hw}
 
+        # Resolve explicit file ids before generating any, regardless of device order.
+        file_ids_by_path = {}
+        for hw in hardware.values():
+            if not isinstance(hw, dict) or hw.get('file_id') is None:
+                continue
+            path = hw.get('image', hw.get('disk_image'))
+            if path is None and 'raw_image' in hw:
+                path = os.path.splitext(hw['raw_image'])[0] + ".vmdk"
+            if path is None:
+                continue
+            path = os.path.abspath(path)
+            file_id = hw['file_id']
+            if path in file_ids_by_path and file_ids_by_path[path] != file_id:
+                raise ValidationError(f"conflicting file ids for '{path}': '{file_ids_by_path[path]}' and '{file_id}'")
+            file_ids_by_path[path] = file_id
+
         # files used by more than one device (e.g. a CD image) are referenced once
         files_by_path = {}
-
-        def known_file(path, file_id):
-            file = files_by_path.get(os.path.abspath(path))
-            if file is not None and file_id is not None and file_id != file.id:
-                # a different id for the same file, this will be reported below
-                return None
-            return file
 
         for hw_id, hw in hardware.items():
             if isinstance(hw, dict):
                 if 'image' in hw:
-                    file = known_file(hw['image'], hw.get('file_id', None))
+                    path = os.path.abspath(hw['image'])
+                    file = files_by_path.get(path)
                     if file is None:
                         file = OVFFile(hw['image'],
-                                       file_id=hw.get('file_id', None))
+                                       file_id=file_ids_by_path.get(path))
                         files.append(file)
                         files_by_path.setdefault(file.path, file)
                     hw['image'] = file
@@ -1116,12 +1126,13 @@ class OVF(object):
                     if 'disk_image' not in hw:
                         # if vmdk file is unset, use the raw image name and replace the extension
                         hw['disk_image'] = os.path.splitext(hw['raw_image'])[0] + ".vmdk"
-                    file = known_file(hw['disk_image'], hw.get('file_id', None))
+                    path = os.path.abspath(hw['disk_image'])
+                    file = files_by_path.get(path)
                     disk = OVFDisk(hw['disk_image'],
                                    units=hw.get('units', None),
                                    raw_image=hw.get('raw_image', None),
                                    disk_id=hw.get('disk_id', None),
-                                   file_id=hw.get('file_id', None),
+                                   file_id=file_ids_by_path.get(path),
                                    sector_size=hw.get('sector_size', None),
                                    file=file)
                     disks.append(disk)

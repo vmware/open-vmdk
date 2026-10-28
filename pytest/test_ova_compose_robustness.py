@@ -335,7 +335,8 @@ def test_same_file_name(output):
     assert "have the same file name 'dummy.vmdk'" in process.stderr
 
 
-def test_same_image_twice():
+@pytest.mark.parametrize("explicit_id_on_second", [False, True])
+def test_same_image_twice(explicit_id_on_second):
     """the same image can be used by more than one device, and is referenced once"""
     yaml_text = cdrom_yaml("cdimage") + """
     cdrom2:
@@ -343,32 +344,57 @@ def test_same_image_twice():
         parent: ide1
         image: cd.iso
 """
+    if explicit_id_on_second:
+        yaml_text = yaml_text.replace("        file_id: cdimage\n", "") + "        file_id: cdimage\n"
     process, ovf = compose(yaml_text, output="out.ovf")
     assert process.returncode == 0, process.stderr
     hrefs = [f['@ovf:href'] for f in files(ovf)]
     assert hrefs.count("cd.iso") == 1
+    assert next(f for f in files(ovf) if f['@ovf:href'] == "cd.iso")['@ovf:id'] == "cdimage"
+    items = as_list(ovf['Envelope']['VirtualSystem']['VirtualHardwareSection']['Item'])
+    assert [i['rasd:HostResource'] for i in items if i['rasd:ResourceType'] == "15"] == ["ovf:/file/cdimage"] * 2
 
     process, _ = compose(yaml_text, output="out.ova")
     assert process.returncode == 0, process.stderr
 
 
 @pytest.mark.parametrize("output", ["out.ovf", "out.ova"])
-def test_same_disk_image_twice(output):
+@pytest.mark.parametrize("explicit_id_on", [None, "first", "second"])
+@pytest.mark.parametrize("image_source", ["disk_image: dummy.vmdk", "raw_image: dummy.img"])
+def test_same_disk_image_twice(output, explicit_id_on, image_source):
     """the same disk image can be used by more than one disk, it is referenced once"""
-    yaml_text = BASE_YAML.replace("disk_image: dummy.vmdk", "disk_image: dummy.vmdk\n        disk_id: disk1") + """
+    yaml_text = BASE_YAML.replace("disk_image: dummy.vmdk", "disk_image: dummy.vmdk\n        disk_id: disk1") + f"""
     datadisk:
         type: hard_disk
         parent: sata1
-        disk_image: dummy.vmdk
+        {image_source}
         disk_id: disk2
 """
+    if explicit_id_on is not None:
+        disk_id = "disk1" if explicit_id_on == "first" else "disk2"
+        yaml_text = yaml_text.replace(f"        disk_id: {disk_id}\n", f"        disk_id: {disk_id}\n        file_id: shared\n")
     process, ovf = compose(yaml_text, output=output)
     assert process.returncode == 0, process.stderr
     if ovf is not None:
         assert [f['@ovf:href'] for f in files(ovf)] == ["dummy.vmdk"]
         file_id = files(ovf)[0]['@ovf:id']
+        if explicit_id_on is not None:
+            assert file_id == "shared"
         assert {d['@ovf:fileRef'] for d in disks(ovf).values()} == {file_id}
         assert set(disks(ovf).keys()) == {"disk1", "disk2"}
+
+
+def test_same_image_conflicting_file_ids():
+    yaml_text = cdrom_yaml("first") + """
+    cdrom2:
+        type: cd_drive
+        parent: ide1
+        image: cd.iso
+        file_id: second
+"""
+    process, _ = compose(yaml_text)
+    assert process.returncode != 0
+    assert "conflicting file ids" in process.stderr
 
 
 NON_STRING_PRODUCT = """
