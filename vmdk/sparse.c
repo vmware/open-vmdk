@@ -62,7 +62,7 @@ typedef struct GrainInfo {
 
 typedef struct SparseVmdkWriter {
     SparseGTInfo gtInfo;
-    uint32_t curSP;
+    uint64_t curSP; /* 64 bit, so that exceeding the 32 bit limit of grain table entries can be detected */
     GrainInfo currentGrain;
     int fd;
     char *fileName;
@@ -297,13 +297,25 @@ getGDGT(SparseGTInfo *gtInfo,
 
     {
         uint64_t GTEs = gtInfo->lastGrainNr + (gtInfo->lastGrainSize != 0);
-        /* Number of GTEs must be less than 2^32.  Actually capacity must be less than 2^32 (2TB) for everything except streamOptimized format... */
-        uint32_t GTs = CEILING(GTEs, hdr->numGTEsPerGT);
-        uint32_t GDsectors = CEILING(GTs * sizeof(uint32_t), VMDK_SECTOR_SIZE);
-        uint32_t GTsectors = CEILING(hdr->numGTEsPerGT * sizeof(uint32_t), VMDK_SECTOR_SIZE);
-        uint32_t *gd = calloc(GDsectors + GTsectors * GTs, VMDK_SECTOR_SIZE);
+        uint64_t GTs;
+        uint64_t GDsectors;
+        uint64_t GTsectors;
+        uint32_t *gd;
         uint32_t *gt;
 
+        /* Number of GTEs must be less than 2^32.  Actually capacity must be less than 2^32 (2TB) for everything except streamOptimized format...
+           Grain numbers are handled as uint32_t, and all metadata sizes (in sectors) must fit into uint32_t as well.
+           All computations are done in 64 bit so that values from an untrusted header cannot wrap around. */
+        if (GTEs > UINT32_MAX) {
+            return false;
+        }
+        GTs = CEILING(GTEs, (uint64_t)hdr->numGTEsPerGT);
+        GDsectors = CEILING(GTs * sizeof(uint32_t), VMDK_SECTOR_SIZE);
+        GTsectors = CEILING((uint64_t)hdr->numGTEsPerGT * sizeof(uint32_t), VMDK_SECTOR_SIZE);
+        if (GDsectors + GTsectors * GTs > UINT32_MAX) {
+            return false;
+        }
+        gd = calloc(GDsectors + GTsectors * GTs, VMDK_SECTOR_SIZE);
         if (!gd) {
             return false;
         }
@@ -380,10 +392,19 @@ isZeroed(const void *data,
          size_t len)
 {
     const uint64_t *data64 = data;
-    len = len >> 3;
+    const uint8_t *data8;
+    size_t len64 = len >> 3;
 
-    while (len--) {
+    while (len64--) {
         if (*data64++ != 0) {
+            return false;
+        }
+    }
+    /* trailing bytes if len is not a multiple of 8 */
+    data8 = (const uint8_t *)data64;
+    len &= 7;
+    while (len--) {
+        if (*data8++ != 0) {
             return false;
         }
     }
@@ -450,7 +471,7 @@ deflateGrain(GrainInfo *grain)
 }
 
 static ssize_t
-writeGrain(StreamOptimizedDiskInfo *sodi, GrainInfo *grain, uint32_t sp)
+writeGrain(StreamOptimizedDiskInfo *sodi, GrainInfo *grain, uint64_t sp)
 {
     size_t dataLen;
     uint32_t rem;
@@ -464,10 +485,16 @@ writeGrain(StreamOptimizedDiskInfo *sodi, GrainInfo *grain, uint32_t sp)
         return -1;
     }
 
-    sodi->writer.gtInfo.gt[grain->bufferNr] = __cpu_to_le32(sp);
-
     dataLen = grain->zstream.next_out - grain->zlibBuffer.data;
-    grainHdr->lba = grain->bufferNr * sodi->diskHdr.grainSize;
+
+    /* grain table entries are 32 bit sector numbers */
+    if (sp + CEILING(dataLen, VMDK_SECTOR_SIZE) > UINT32_MAX) {
+        fprintf(stderr, "VMDK file too large, the compressed data must be less than 2TB\n");
+        return -1;
+    }
+
+    sodi->writer.gtInfo.gt[grain->bufferNr] = __cpu_to_le32(sp);
+    grainHdr->lba = __cpu_to_le64(grain->bufferNr * sodi->diskHdr.grainSize);
     grainHdr->cmpSize = __cpu_to_le32(dataLen - sizeof *grainHdr);
     rem = dataLen & (VMDK_SECTOR_SIZE - 1);
     if (rem != 0) {
@@ -643,6 +670,8 @@ failDeflate:
     deflateEnd(&grain->zstream);
 failGrainBuffer:
     free(grain->buffer);
+    /* callers may still call freeGrain() */
+    grain->buffer = NULL;
 fail:
     return false;
 }
@@ -698,7 +727,10 @@ static void
         // Check if all work is done globally
         if (readPos >= capacity) {
             pthread_mutex_lock(&gtCtx->stateMutex);
-            gtCtx->state = GT_STATE_DONE;
+            /* another thread may have failed in the mean time, do not hide that */
+            if (gtCtx->state != GT_STATE_FAILED) {
+                gtCtx->state = GT_STATE_DONE;
+            }
             pthread_mutex_unlock(&gtCtx->stateMutex);
             pthread_mutex_unlock(&gtCtx->readPosMutex);
             break;
@@ -724,11 +756,14 @@ static void
         if (gtCtx->src->vmt->pread(gtCtx->src, grain.buffer, readLen, readPos) != (ssize_t)readLen) {
             goto fail;
         }
-        grain.bufferValidEnd = readLen;
+        /* The capacity in the header is in sectors, so the last grain must be
+           padded to a full sector if the source size is not a multiple of it. */
+        grain.bufferValidEnd = CEILING(readLen, VMDK_SECTOR_SIZE) * VMDK_SECTOR_SIZE;
+        memset(grain.buffer + readLen, 0, grain.bufferValidEnd - readLen);
 
         // Process non-zero data
-        if (!isZeroed(grain.buffer, readLen)) {
-            uint32_t sp;
+        if (!isZeroed(grain.buffer, grain.bufferValidEnd)) {
+            uint64_t sp;
             if (deflateGrain(&grain) < 0) {
                 goto fail;
             }
@@ -784,6 +819,14 @@ writeDescriptor(int fd, const SparseExtentHeader *hdr, uint32_t sectorSize)
     descFile = makeDiskDescriptorFile("disk", hdr->capacity, sectorSize, cid);
     if (!descFile) {
         fprintf(stderr, "Failed to create descriptor file\n");
+        return false;
+    }
+
+    /* The descriptor must not overwrite the metadata following it. */
+    if (strlen(descFile) > hdr->descriptorSize * VMDK_SECTOR_SIZE) {
+        fprintf(stderr, "Descriptor file too large (%zu bytes, maximum is %llu)\n",
+                strlen(descFile), (unsigned long long)(hdr->descriptorSize * VMDK_SECTOR_SIZE));
+        free(descFile);
         return false;
     }
 
@@ -1278,8 +1321,14 @@ StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLeve
     sodi->diskHdr.gdOffset = sodi->diskHdr.overHead;
     sodi->diskHdr.overHead += sodi->writer.gtInfo.GDsectors;
     sodi->diskHdr.overHead = prefillGD(&sodi->writer.gtInfo, sodi->diskHdr.overHead);
+    /* grain directory entries are 32 bit sector numbers */
+    if (sodi->diskHdr.overHead > UINT32_MAX) {
+        goto failFd;
+    }
 
-    initGrain(sodi, &sodi->writer.currentGrain);
+    if (!initGrain(sodi, &sodi->writer.currentGrain)) {
+        goto failFd;
+    }
 
     sodi->writer.curSP = sodi->diskHdr.overHead;
     if (lseek(sodi->writer.fd, sodi->writer.curSP * VMDK_SECTOR_SIZE, SEEK_SET) == -1) {
@@ -1288,7 +1337,9 @@ StreamOptimized_Create(const char *fileName, off_t capacity, int compressionLeve
     return &sodi->hdr;
 
 failAll:
-    free(sodi->writer.currentGrain.zlibBuffer.data);
+    freeGrain(&sodi->writer.currentGrain);
+failFd:
+    close(sodi->writer.fd);
 failGDGT:
     free(sodi->writer.gtInfo.gd);
 failFileName:
@@ -1367,6 +1418,12 @@ SparseNextData(DiskInfo *self,
     uint32_t skip = p & (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE - 1);
     bool want = false;
 
+    /* The last grain may be partial, so p can be within a grain that has data, but past the end of the disk. */
+    if (p >= SparseGetCapacity(self)) {
+        errno = ENXIO;
+        return -1;
+    }
+
     while (grainNr < sdi->gtInfo.GTEs) {
         bool empty = sdi->gtInfo.gt[grainNr] == __cpu_to_le32(0);
 
@@ -1390,22 +1447,18 @@ SparseNextData(DiskInfo *self,
 }
 
 static ssize_t
-SparsePread(DiskInfo *self,
-            void *buf,
-            size_t len,
-            off_t pos)
+sparsePreadInflate(DiskInfo *self,
+                   z_stream *zstream,
+                   void *buf,
+                   size_t len,
+                   off_t pos)
 {
     SparseDiskInfo *sdi = getSDI(self);
     uint8_t *buf8 = buf;
     uint8_t grainBuf[sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE];
     uint8_t readBuf[(sdi->diskHdr.grainSize + 1) * VMDK_SECTOR_SIZE];
-    z_stream zstream = {0};
     uint32_t grainNr = pos / (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE);
     uint32_t readSkip = pos & (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE - 1);
-
-    if (inflateInit(&zstream) != Z_OK) {
-        return -1;
-    }
 
     while (len > 0) {
         uint32_t readLen;
@@ -1462,15 +1515,26 @@ SparsePread(DiskInfo *self,
                         return -1;
                     }
                 }
-                zstream.next_in = readBuf + hdrlen;
-                zstream.avail_in = cmpSize;
-                zstream.next_out = grainBuf;
-                zstream.avail_out = sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE;
-                if (inflate(&zstream, Z_FINISH) != Z_STREAM_END) {
+                zstream->next_in = readBuf + hdrlen;
+                zstream->avail_in = cmpSize;
+                zstream->next_out = grainBuf;
+                zstream->avail_out = sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE;
+                if (inflate(zstream, Z_FINISH) != Z_STREAM_END) {
                     return -1;
                 }
-                if (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE - zstream.avail_out < grainSize) {
-                    return -1;
+                {
+                    uint32_t inflated = sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE - zstream->avail_out;
+
+                    if (inflated < grainSize) {
+                        /* Older versions of vmdk-convert did not pad the last grain to a full sector
+                           if the source size was not a multiple of the sector size. Accept that.
+                           Use GTEs - 1 for the final grain: if the capacity is a multiple of the grain
+                           size, lastGrainNr is one past it. */
+                        if (grainNr != sdi->gtInfo.GTEs - 1 || grainSize - inflated >= VMDK_SECTOR_SIZE) {
+                            return -1;
+                        }
+                        memset(grainBuf + inflated, 0, grainSize - inflated);
+                    }
                 }
                 memcpy(buf8, grainBuf + readSkip, readLen);
             } else {
@@ -1484,12 +1548,29 @@ SparsePread(DiskInfo *self,
         grainNr++;
         readSkip = 0;
         if (len > 0) {
-            if (inflateReset(&zstream) != Z_OK) {
+            if (inflateReset(zstream) != Z_OK) {
                 return -1;
             }
         }
     }
     return buf8 - (uint8_t *)buf;
+}
+
+static ssize_t
+SparsePread(DiskInfo *self,
+            void *buf,
+            size_t len,
+            off_t pos)
+{
+    z_stream zstream = {0};
+    ssize_t ret;
+
+    if (inflateInit(&zstream) != Z_OK) {
+        return -1;
+    }
+    ret = sparsePreadInflate(self, &zstream, buf, len, pos);
+    inflateEnd(&zstream);
+    return ret;
 }
 
 static int
@@ -1737,6 +1818,7 @@ Sparse_Open(const char *fileName)
     return &sdi->hdr;
 
 failDF:
+    free(sdi->gtInfo.gd);
 failSdi:
     free(sdi);
 failFd:

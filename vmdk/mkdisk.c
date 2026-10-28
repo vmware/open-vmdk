@@ -32,6 +32,9 @@
    default is 2^31-1 (unknown) */
 char *toolsVersion = "2147483647";
 
+/* upper limit for the number of compression threads */
+#define MAX_THREADS 1024
+
 // Forward declaration for sparse disk structure
 typedef struct {
     DiskInfo hdr;
@@ -79,7 +82,7 @@ copyDisk(DiskInfo *src, DiskInfo *dst, int numThreads)
 
         ret = dst->vmt->copyDisk(src, dst, numThreads);
         if (ret < 0) {
-            return false;
+            goto failAll;
         }
     } else {
         off_t end = 0;
@@ -114,7 +117,7 @@ printUsage(char *cmd, int compressionLevel, int numThreads, int sectorSize)
     printf("%s [-c compressionlevel] [-n threads] [-t toolsVersion] [--noreorder] [-s size] src.vmdk dst.vmdk: converts source disk to destination disk with given tools version\n\n", cmd);
     printf("-c <level> sets the compression level. Valid values are 1 (fastest) to 9 (best). Only when writing to VMDK. Current is %d.\n", compressionLevel);
     printf("-n <threads> sets the number of threads used for compression level. Only when writing to VMDK. Current is %d.\n", numThreads);
-    printf("-s, --sector-size <size> sets the sector size which will be written to the descriptor file unless it is 0. Current is %d.\n", sectorSize);
+    printf("-s, --sector-size <size> sets the sector size (512 or 4096) which will be written to the descriptor file unless it is 0. Current is %d.\n", sectorSize);
     printf("--detailed shows detailed sparse extent header information (only with -i)\n");
     printf("--get-descriptor prints the descriptor file content to stdout\n");
     printf("--noreorder disables grain reordering after compression (default: reordering enabled)\n");
@@ -141,6 +144,54 @@ isNumber(const char *text)
         return false;
     }
     return true;
+}
+
+/* Parse a decimal number in the range [min, max] */
+static bool
+parseNumber(const char *text, long min, long max, long *value)
+{
+    char *end;
+    long n;
+
+    if (!isNumber(text))
+        return false;
+
+    errno = 0;
+    n = strtol(text, &end, 10);
+    if (errno != 0 || *end != '\0' || n < min || n > max)
+        return false;
+
+    *value = n;
+    return true;
+}
+
+/* Write src to dst as JSON string content, with escaping, and return the
+   number of characters written (without null termination).
+   dst must have room for 6 * strlen(src) characters. */
+static size_t
+jsonEscape(char *dst, const char *src)
+{
+    static const char hex[] = "0123456789abcdef";
+    char *p = dst;
+
+    for (; *src; src++) {
+        unsigned char c = *src;
+
+        if (c == '"' || c == '\\') {
+            *p++ = '\\';
+            *p++ = c;
+        } else if (c < 0x20) {
+            *p++ = '\\';
+            *p++ = 'u';
+            *p++ = '0';
+            *p++ = '0';
+            *p++ = hex[c >> 4];
+            *p++ = hex[c & 0xf];
+        } else {
+            *p++ = c;
+        }
+    }
+    return p - dst;
 }
 
 /* Parse the descriptor file and return a JSON string with the key-value pairs */
@@ -218,11 +269,14 @@ parseDescriptorFile(const char *descriptor)
                 // Add the key-value pair to the result
                 if (strlen(key) > 0) {
                     // Calculate the required space for this entry
-                    size_t entry_size = strlen(key) + strlen(value) + 10; // 10 for quotes, colon, comma, etc.
+                    // each character may need up to 6 characters when escaped
+                    size_t entry_size = 6 * (strlen(key) + strlen(value)) + 10; // 10 for quotes, colon, comma, etc.
 
                     // Ensure we have enough space
                     if (result_size + entry_size > result_capacity) {
-                        result_capacity *= 2;
+                        while (result_size + entry_size > result_capacity) {
+                            result_capacity *= 2;
+                        }
                         char *new_result = realloc(result, result_capacity);
                         if (!new_result) {
                             free(result);
@@ -232,27 +286,30 @@ parseDescriptorFile(const char *descriptor)
                         result = new_result;
                     }
 
-                    // Insert before the closing brace
-                    result[result_size - 1] = '\0'; // Remove closing brace
+                    // Insert before the closing brace. Append at the known end of the
+                    // result instead of using strcat(), which would be O(n^2).
+                    char *p = result + result_size - 1;
 
                     // Add comma if not the first entry
                     if (!first_entry) {
-                        strcat(result, ", ");
-                        result_size += 2;
+                        memcpy(p, ", ", 2);
+                        p += 2;
                     } else {
                         first_entry = false;
                     }
 
                     // Add the key-value pair
-                    strcat(result, "\"");
-                    strcat(result, key);
-                    strcat(result, "\": \"");
-                    strcat(result, value);
-                    strcat(result, "\"");
-                    strcat(result, "}");
+                    *p++ = '"';
+                    p += jsonEscape(p, key);
+                    memcpy(p, "\": \"", 4);
+                    p += 4;
+                    p += jsonEscape(p, value);
+                    *p++ = '"';
+                    *p++ = '}';
+                    *p = '\0';
 
                     // Update result_size
-                    result_size = strlen(result);
+                    result_size = p - result;
                 }
             }
         }
@@ -282,6 +339,7 @@ main(int argc,
     int numThreads = get_nprocs();
     int sectorSize = 0;
     const char *env;
+    long n;
 
     static struct option long_options[] = {
         {"detailed", no_argument, 0, 'd'},
@@ -292,33 +350,30 @@ main(int argc,
         {0, 0, 0, 0}
     };
 
+    if (numThreads > MAX_THREADS)
+        numThreads = MAX_THREADS;
+
     gettimeofday(&tv, NULL);
     srand48(tv.tv_sec ^ tv.tv_usec);
 
     /* use environment values, but only if sanity checked */
     if ((env = getenv("VMDKCONVERT_COMPRESSION_LEVEL")) != NULL) {
-        if (isNumber(env)) {
-            int n = atoi(env);
-            if (n > 0 && n <= 9)
-                compressionLevel = atoi(env);
-        }
+        if (parseNumber(env, 1, 9, &n))
+            compressionLevel = n;
     }
     if ((env = getenv("VMDKCONVERT_NUM_THREADS")) != NULL) {
-        if (isNumber(env)) {
-            int n = atoi(env);
-            if (n > 0)
-                numThreads = atoi(env);
-        }
+        if (parseNumber(env, 1, MAX_THREADS, &n))
+            numThreads = n;
     }
 
     while ((opt = getopt_long(argc, argv, "c:hin:s:t:", long_options, NULL)) != -1) {
         switch (opt) {
         case 'c':
-            if (!isNumber(optarg)){
+            if (!parseNumber(optarg, 0, 9, &n)) {
                 fprintf(stderr, "invalid compression level: %s\n", optarg);
                 exit(1);
             }
-            compressionLevel = atoi(optarg);
+            compressionLevel = n;
             break;
         case 'i':
             doInfo = true;
@@ -330,26 +385,26 @@ main(int argc,
             doGetDescriptor = true;
             break;
         case 'n':
-            if (!isNumber(optarg)) {
-                fprintf(stderr, "invalid threads value: %s\n", optarg);
+            if (!parseNumber(optarg, 1, MAX_THREADS, &n)) {
+                fprintf(stderr, "invalid threads value: %s (must be 1 to %d)\n", optarg, MAX_THREADS);
                 exit(1);
             }
-            numThreads = atoi(optarg);
+            numThreads = n;
             break;
         case 'r':
             doReorder = false;
             break;
         case 's':
-            if (!isNumber(optarg)) {
-                fprintf(stderr, "invalid sector-size value: %s\n", optarg);
+            if (!parseNumber(optarg, 0, 4096, &n) || (n != 0 && n != 512 && n != 4096)) {
+                fprintf(stderr, "invalid sector-size value: %s (must be 0, 512 or 4096)\n", optarg);
                 exit(1);
             }
-            sectorSize = atoi(optarg);
+            sectorSize = n;
             break;
         case 't':
             doConvert = true;
             toolsVersion = optarg;
-            if (!isNumber(toolsVersion)){
+            if (!parseNumber(toolsVersion, 0, INT32_MAX, &n)) {
                 fprintf(stderr, "invalid tools version: %s\n", toolsVersion);
                 exit(1);
             }
@@ -484,7 +539,7 @@ main(int argc,
             }
             capacity = di->vmt->getCapacity(di);
 
-            if (strcmp(&(filename[strlen(filename) - 5]), ".vmdk") == 0)
+            if (strlen(filename) >= 5 && strcmp(&(filename[strlen(filename) - 5]), ".vmdk") == 0)
                 tgt = StreamOptimized_Create(filename, capacity, compressionLevel, doReorder, sectorSize);
             else
                 tgt = Flat_Create(filename, capacity);
@@ -499,6 +554,7 @@ main(int argc,
                     printf("Success\n");
                 } else {
                     fprintf(stderr, "Failure!\n");
+                    di->vmt->close(di);
                     exit(1);
                 }
             }
