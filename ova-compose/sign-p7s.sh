@@ -78,11 +78,39 @@ if [ -n "${cert_file}" ]; then
     esac
 fi
 
+# write to temporary files first, so that no partial files are left on failure
+p7s_tmp="${p7s_file}.tmp"
+cert_tmp="${cert_file:+${cert_file}.tmp}"
+cert_backup=
+cert_published=false
+cleanup() {
+    status=$?
+    # If publishing the p7s failed, undo publication of the cert as well.
+    if [ "$status" -ne 0 ] && "$cert_published"; then
+        if [ -n "$cert_backup" ]; then
+            # Keep the backup if restoring it fails.
+            mv -f -- "$cert_backup" "$cert_file" || return "$status"
+        else
+            rm -f -- "$cert_file"
+        fi
+    fi
+    rm -f -- "$p7s_tmp" ${cert_tmp:+"$cert_tmp"} ${cert_backup:+"$cert_backup"}
+    return "$status"
+}
+trap cleanup EXIT
+
 openssl cms -sign -binary -nosmimecap -cades -md "${sign_alg}" \
-    "${signer_args[@]}" -in "${mf_file}" -outform DER -out "${p7s_file}"
+    "${signer_args[@]}" -in "${mf_file}" -outform DER -out "${p7s_tmp}"
 
 if [ -n "${cert_file}" ]; then
     signature=$(openssl dgst -"${sign_alg}" -sign "${cert_keyfile}" -out - "${mf_file}" | od -An -v -tx1 | tr -d ' \n')
-    echo "${sign_alg^^}($(basename "${mf_file}"))= ${signature}" > "${cert_file}"
-    sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' "${cert_keyfile}" >> "${cert_file}"
+    echo "${sign_alg^^}($(basename "${mf_file}"))= ${signature}" > "${cert_tmp}"
+    sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' "${cert_keyfile}" >> "${cert_tmp}"
+    if [ -e "$cert_file" ] || [ -L "$cert_file" ]; then
+        cert_backup=$(mktemp "${cert_file}.backup.XXXXXX")
+        cp -pP -- "$cert_file" "$cert_backup"
+    fi
+    mv -- "${cert_tmp}" "${cert_file}"
+    cert_published=true
 fi
+mv -- "${p7s_tmp}" "${p7s_file}"

@@ -23,6 +23,7 @@ import json
 from lxml import etree as ET
 import hashlib
 import tempfile
+import shlex
 import shutil
 from concurrent.futures import ProcessPoolExecutor
 
@@ -64,17 +65,23 @@ def xml_indent(elem, level=0):
         elem.tail = i
 
 
+def xml_value(value):
+    """Convert a value from the YAML config (e.g. a number or a boolean) to a string for XML"""
+    if value is None or type(value) is str:
+        return value
+    if type(value) is bool:
+        return "true" if value else "false"
+    return str(value)
+
+
 def xml_text_element(tag, value):
     elem = ET.Element(tag)
-    elem.text = value
+    elem.text = xml_value(value)
     return elem
 
 
 def xml_config(key, value):
-    if type(value) is bool:
-        value = "true" if value else "false"
-    elif type(value) is not str:
-        value = str(value)
+    value = xml_value(value)
     return ET.Element('{%s}Config' % NS_VMW, { '{%s}required' % NS_OVF: 'false', '{%s}key' % NS_VMW: key, '{%s}value' % NS_VMW: value})
 
 
@@ -252,10 +259,15 @@ class RasdMemory(RasdItem):
 
 
 class RasdController(RasdItem):
+    # maximum number of devices, None for no limit
+    max_children = None
+    # addresses that cannot be used by devices
+    reserved_addresses = ()
 
     def __init__(self, subtype, config=None):
         super().__init__(config=config)
         self.next_child_address = 0
+        self.num_children = 0
         self.subtype = subtype
 
 
@@ -266,13 +278,21 @@ class RasdController(RasdItem):
 
 
     def add_child(self, child):
+        if self.max_children is not None and self.num_children >= self.max_children:
+            raise ValidationError(f"too many devices for the {self.description}, the maximum is {self.max_children}")
+        while self.next_child_address in self.reserved_addresses:
+            self.next_child_address += 1
         child.address_on_parent = self.next_child_address
         self.next_child_address += 1
+        self.num_children += 1
 
 
 class RasdScsiController(RasdController):
     resource_type = 6
     description = "SCSI Controller"
+    max_children = 15
+    # unit 7 is used by the controller itself
+    reserved_addresses = (7,)
 
 
     def __init__(self, subtype, config=None):
@@ -291,6 +311,16 @@ class RasdScsiController(RasdController):
             raise Exception(f"invalid SCSI subtype '{self.subtype}'")
 
 
+    def set_hardware_limits(self, system_type):
+        # PVSCSI supports 64 disks with HWv14 and later, plus the controller
+        # at unit 7. Every advertised hardware version must support the disks.
+        types = str(system_type).split()
+        supports_64 = bool(types) and all(
+            t.startswith('vmx-') and t[4:].isdigit() and int(t[4:]) >= 14
+            for t in types)
+        self.max_children = 64 if self.subtype == 'VirtualSCSI' and supports_64 else 15
+
+
     def xml_item(self, required, element_name):
         item = super().xml_item(required, element_name)
         item.append(self.xml_element('ResourceSubType', self.subtype))
@@ -301,6 +331,7 @@ class RasdScsiController(RasdController):
 class RasdSataController(RasdController):
     resource_type = 20
     description = "SATA Controller"
+    max_children = 30
 
 
     def xml_item(self, required, element_name):
@@ -325,6 +356,8 @@ class RasdNvmeController(RasdController):
 class RasdIdeController(RasdController):
     resource_type = 5
     description = "IDE Controller"
+    # master and slave
+    max_children = 2
 
 
 class RasdControllerItem(RasdItem):
@@ -546,13 +579,14 @@ class RasdEthernet(RasdItem):
 
 class OVFNetwork(object):
 
-    def __init__(self, name, description):
+    def __init__(self, name, description=None):
         self.name = name
 
 
     @classmethod
     def from_dict(cls, d):
-        item = cls(d['name'], d['description'])
+        # the description is optional, and not used (the description in the OVF is generated from the name)
+        item = cls(d['name'], d.get('description'))
         return item
 
 
@@ -565,14 +599,24 @@ class OVFNetwork(object):
         return item
 
 
+def new_id(cls, prefix):
+    """Return the next generated id for cls, skipping the ids set explicitly in the config"""
+    while True:
+        id = f"{prefix}{cls.next_id}"
+        cls.next_id += 1
+        if id not in cls.reserved_ids:
+            return id
+
+
 class OVFFile(object):
     next_id = 0
+    # ids set explicitly in the config, these are not generated
+    reserved_ids = set()
 
     def __init__(self, path, file_id=None):
         self.path = os.path.abspath(path)
         if file_id is None:
-            self.id = f"file{OVFFile.next_id}"
-            OVFFile.next_id += 1
+            self.id = new_id(OVFFile, "file")
         else:
             self.id = file_id
         self.size = os.path.getsize(self.path)
@@ -592,6 +636,8 @@ class OVFFile(object):
 
 class OVFDisk(object):
     next_id = 0
+    # ids set explicitly in the config, these are not generated
+    reserved_ids = set()
 
     allocation_units_map = {
             'byte' : "byte",
@@ -609,25 +655,27 @@ class OVFDisk(object):
             'byte * 2^40' : 2 ** 40,
     }
 
-    def __init__(self, path, units=None, disk_id=None, file_id=None, raw_image=None, sector_size=None):
-        if disk_id is None:
-            self.id = f"vmdisk{OVFDisk.next_id}"
-            OVFDisk.next_id += 1
-        else:
-            self.id = disk_id
-
-        # units can be unspecified (default: byte),
+    @classmethod
+    def _units(cls, units, default):
+        # units can be unspecified (default),
         # one of KB, MB, ...
         # or byte * 2^10, ... with exponents 10-40
         if units is None:
-            units = "byte"
-        elif units in self.allocation_units_map:
-            units = self.allocation_units_map[units]
-        elif units in self.allocation_factors:
-            pass
+            units = default
+        if units in cls.allocation_units_map:
+            return cls.allocation_units_map[units]
+        if units in cls.allocation_factors:
+            return units
+        raise ValidationError(f"invalid units '{units}', must be one of {', '.join(cls.allocation_units_map)} or {', '.join(cls.allocation_factors)}")
+
+
+    def __init__(self, path, units=None, disk_id=None, file_id=None, raw_image=None, sector_size=None, file=None):
+        if disk_id is None:
+            self.id = new_id(OVFDisk, "vmdisk")
         else:
-            assert False, "invalid units used"
-        self.units = units
+            self.id = disk_id
+
+        self.units = self._units(units, "byte")
 
         self.sector_size = int(sector_size) if sector_size is not None else None
 
@@ -643,9 +691,11 @@ class OVFDisk(object):
             else:
                 print(f"warning: raw image file {raw_image} does not exist, using {path}")
 
-        self.file = OVFFile(path, file_id=file_id)
+        # file is the OVFFile if the image is already used by another disk
+        self.file = file if file is not None else OVFFile(path, file_id=file_id)
         disk_info = OVF._disk_info(path)
-        self.capacity = int(disk_info['capacity'] / self.allocation_factors[self.units])
+        # round up, the disk must not be smaller than the image
+        self.capacity = -(-disk_info['capacity'] // self.allocation_factors[self.units])
         self.used = disk_info['used']
 
         if 'descriptorFile' in disk_info and 'ddb.logicalSectorSize' in disk_info['descriptorFile']:
@@ -675,16 +725,14 @@ class OVFDisk(object):
 
 class OVFEmptyDisk(OVFDisk):
 
-    def __init__(self, capacity, units="MB", disk_id=None):
+    def __init__(self, capacity, units=None, disk_id=None):
         if disk_id is None:
-            self.id = f"vmdisk{OVFDisk.next_id}"
-            OVFDisk.next_id += 1
+            self.id = new_id(OVFDisk, "vmdisk")
         else:
             self.id = disk_id
         self.capacity = capacity
-        if units in self.allocation_units_map:
-            units = self.allocation_units_map[units]
-        self.units = units
+        # for empty disks, the default is MB
+        self.units = self._units(units, "MB")
         self.sector_size = None
 
     def xml_item(self):
@@ -729,8 +777,8 @@ class OVFProperty(object):
 
     def xml_item(self):
         xml_attrs = {
-            '{%s}key' % NS_OVF: self.key,
-            '{%s}type' % NS_OVF: self.type
+            '{%s}key' % NS_OVF: xml_value(self.key),
+            '{%s}type' % NS_OVF: xml_value(self.type)
         }
 
         # Handle the default value for the property
@@ -745,11 +793,11 @@ class OVFProperty(object):
 
         # Add other standard attributes
         if self.qualifiers is not None:
-            xml_attrs['{%s}qualifiers' % NS_OVF] = self.qualifiers
+            xml_attrs['{%s}qualifiers' % NS_OVF] = xml_value(self.qualifiers)
         if self.user_configurable:
             xml_attrs['{%s}userConfigurable' % NS_OVF] = "true"
         if self.configuration is not None:
-            xml_attrs['{%s}configuration' % NS_OVF] = self.configuration
+            xml_attrs['{%s}configuration' % NS_OVF] = xml_value(self.configuration)
         if self.password:
             xml_attrs['{%s}password' % NS_OVF] = "true"
         if self.required is not None:
@@ -812,7 +860,7 @@ class OVFProduct(object):
         xml_attrs = {}
         for k in self.attr_keys:
             if hasattr(self, k) and getattr(self, k) is not None:
-                xml_attrs['{%s}%s' % (NS_OVF, k)] = getattr(self, k)
+                xml_attrs['{%s}%s' % (NS_OVF, k)] = xml_value(getattr(self, k))
         xml_product = ET.Element('{%s}ProductSection' % NS_OVF, xml_attrs)
 
         for k in self.keys:
@@ -838,13 +886,14 @@ class OVFProduct(object):
 class OVFTextBlock(object):
     # snake case will be converted to camel case in XML
     keys = ['info', 'text', 'file']
+    # the default info, subclasses have their own
+    info = "Information about the installed software"
     info_text = ""
     xml_name = "TextBlock"
     xml_text_name = "TextBlock"
 
 
     def __init__(self, **kwargs):
-        self.info = "Information about the installed software"
         self.__dict__.update((k, v) for k, v in kwargs.items() if k in self.keys)
         if hasattr(self, 'file'):
             file_name = self.file
@@ -900,6 +949,10 @@ class OVFConfiguration(object):
         self.default = False
         self.info = "Information about the installed software"
         self.__dict__.update((k, v) for k, v in kwargs.items() if k in self.keys)
+        # both are required by the OVF schema
+        for k in ['label', 'description']:
+            if getattr(self, k, None) is None:
+                raise ValidationError(f"configuration '{id}' needs a '{k}'")
 
 
     @classmethod
@@ -995,9 +1048,22 @@ class OVF(object):
             if system.get('firmware', "efi") not in ['bios', 'efi']:
                 raise ValidationError("os.firmware must be 'bios' or 'efi'")
             self.hardware_config['firmware'] = system.get('firmware', "efi")
-        if type(system.get('secure_boot', True)) is not bool:
-            raise ValidationError("os.secure_boot must be boolean")
-        self.hardware_config['bootOptions.efiSecureBootEnabled'] = "true" if system.get('secure_boot', True) else "false"
+
+        # Secure boot is enabled by default, unless the firmware is bios, also
+        # with no_default_configs. Like system.firmware, system.secure_boot
+        # overrides hardware.config if it is set, otherwise an explicit
+        # hardware.config setting is used.
+        secure_boot = system.get('secure_boot', None)
+        bios = self.hardware_config.get('firmware') == "bios"
+        if secure_boot is not None:
+            if type(secure_boot) is not bool:
+                raise ValidationError("os.secure_boot must be boolean")
+            if secure_boot and bios:
+                raise ValidationError("os.secure_boot requires os.firmware 'efi'")
+        elif 'bootOptions.efiSecureBootEnabled' not in (hardware_config or {}):
+            secure_boot = not bios
+        if secure_boot is not None:
+            self.hardware_config['bootOptions.efiSecureBootEnabled'] = "true" if secure_boot else "false"
         self.files = files
         self.disks = disks
         self.networks = networks
@@ -1011,6 +1077,8 @@ class OVF(object):
 
         if 'default_configuration' in system:
             dflt_cfg = system['default_configuration']
+            if dflt_cfg not in self.configurations:
+                raise ValidationError(f"default_configuration '{dflt_cfg}' is not in configurations")
             self.configurations[dflt_cfg].default = True
 
         self.connect()
@@ -1030,33 +1098,81 @@ class OVF(object):
         assert 'hardware' in config, "config needs a 'hardware' section"
 
         hardware = config['hardware']
+
+        # do not generate ids that are set explicitly
+        OVFFile.reserved_ids = {str(hw['file_id']) for hw in hardware.values() if isinstance(hw, dict) and 'file_id' in hw}
+        OVFDisk.reserved_ids = {str(hw['disk_id']) for hw in hardware.values() if isinstance(hw, dict) and 'disk_id' in hw}
+
+        # Resolve explicit file ids before generating any, regardless of device order.
+        file_ids_by_path = {}
+        for hw in hardware.values():
+            if not isinstance(hw, dict) or hw.get('file_id') is None:
+                continue
+            path = hw.get('image', hw.get('disk_image'))
+            if path is None and 'raw_image' in hw:
+                path = os.path.splitext(hw['raw_image'])[0] + ".vmdk"
+            if path is None:
+                continue
+            path = os.path.abspath(path)
+            file_id = hw['file_id']
+            if path in file_ids_by_path and file_ids_by_path[path] != file_id:
+                raise ValidationError(f"conflicting file ids for '{path}': '{file_ids_by_path[path]}' and '{file_id}'")
+            file_ids_by_path[path] = file_id
+
+        # files used by more than one device (e.g. a CD image) are referenced once
+        files_by_path = {}
+
         for hw_id, hw in hardware.items():
             if isinstance(hw, dict):
                 if 'image' in hw:
-                    file = OVFFile(hw['image'],
-                                   file_id=hw.get('file_id', None))
-                    files.append(file)
+                    path = os.path.abspath(hw['image'])
+                    file = files_by_path.get(path)
+                    if file is None:
+                        file = OVFFile(hw['image'],
+                                       file_id=file_ids_by_path.get(path))
+                        files.append(file)
+                        files_by_path.setdefault(file.path, file)
                     hw['image'] = file
                 elif 'disk_image' in hw or 'raw_image' in hw:
                     if 'disk_image' not in hw:
                         # if vmdk file is unset, use the raw image name and replace the extension
                         hw['disk_image'] = os.path.splitext(hw['raw_image'])[0] + ".vmdk"
+                    path = os.path.abspath(hw['disk_image'])
+                    file = files_by_path.get(path)
                     disk = OVFDisk(hw['disk_image'],
                                    units=hw.get('units', None),
                                    raw_image=hw.get('raw_image', None),
                                    disk_id=hw.get('disk_id', None),
-                                   file_id=hw.get('file_id', None),
-                                   sector_size=hw.get('sector_size', None))
+                                   file_id=file_ids_by_path.get(path),
+                                   sector_size=hw.get('sector_size', None),
+                                   file=file)
                     disks.append(disk)
-                    files.append(disk.file)
+                    if file is None:
+                        files.append(disk.file)
+                        files_by_path.setdefault(disk.file.path, disk.file)
                     hw['disk'] = disk
                 elif 'disk_capacity' in hw:
                     disk = OVFEmptyDisk(hw['disk_capacity'],
+                                        units=hw.get('units', None),
                                         disk_id=hw.get('disk_id', None))
                     disks.append(disk)
                     hw['disk'] = disk
 
         hardware_config = hardware.get('config', {})
+
+        # files are referenced by their name in the OVF, the manifest and the OVA
+        names = {}
+        for file in files:
+            name = os.path.basename(file.path)
+            if name in names:
+                raise ValidationError(f"'{names[name].path}' and '{file.path}' have the same file name '{name}', "
+                                      "file names must be unique")
+            names[name] = file
+
+        for kind, ids in [("file", [f.id for f in files]), ("disk", [d.id for d in disks])]:
+            duplicates = sorted({str(id) for id in ids if ids.count(id) > 1})
+            if duplicates:
+                raise ValidationError(f"duplicate {kind} id(s): {', '.join(duplicates)}")
 
         networks = {}
         if 'networks' in config:
@@ -1150,6 +1266,11 @@ class OVF(object):
 
 
     def connect(self):
+        # Set limits before attaching children, which may precede their parent
+        # in the configuration.
+        for rasd_item in self.rasd_items.values():
+            if isinstance(rasd_item, RasdScsiController):
+                rasd_item.set_hardware_limits(self.vssd_system.type)
         for hw_id, rasd_item in self.rasd_items.items():
             rasd_item.connect(self)
 
@@ -1209,8 +1330,10 @@ class OVF(object):
             for p in self.products:
                 if p.transports:
                     transports.extend(p.transports)
-            transports = list(set(transports))
-            hw_attrs = {'{%s}transport' % NS_OVF: " ".join(transports)}
+            # remove duplicates, but keep the order so that the output is reproducible
+            transports = list(dict.fromkeys(transports))
+            if transports:
+                hw_attrs = {'{%s}transport' % NS_OVF: " ".join(transports)}
 
         hw = ET.Element('{%s}VirtualHardwareSection' % NS_OVF, hw_attrs)
 
@@ -1345,7 +1468,7 @@ class OVF(object):
         assert "signatureAlgorithm:" in process.stdout, f"signature file {p7s_file} contains no signer"
 
 
-    def sign_manifest_external(self, keyfile, script_format, ovf_file=None, mf_file=None, sign_alg="sha512", sign_format="cert"):
+    def sign_manifest_external(self, keyfile, script_format, ovf_file=None, mf_file=None, sign_alg="sha512", sign_format="cert", cwd=None):
         if ovf_file == None:
             ovf_file = f"{self.name}.ovf"
         if mf_file == None:
@@ -1353,8 +1476,26 @@ class OVF(object):
         cert_file = os.path.splitext(ovf_file)[0] + ".cert"
         p7s_file = os.path.splitext(ovf_file)[0] + ".p7s"
 
-        script = script_format.format(ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg, cert_file=cert_file, p7s_file=p7s_file, keyfile=keyfile)
-        subprocess.check_call(script, shell=True)
+        # The script runs in cwd (the directory ova-compose was started in), not in the
+        # temporary directory for ova and dir output, so that relative paths in the
+        # script work. So pass the files with absolute paths.
+        values = {
+            'ovf_file': os.path.abspath(ovf_file),
+            'mf_file': os.path.abspath(mf_file),
+            'sign_alg': sign_alg,
+            'cert_file': os.path.abspath(cert_file),
+            'p7s_file': os.path.abspath(p7s_file),
+            'keyfile': keyfile,
+        }
+        # the script is run by the shell, so quote the values (e.g. file names with spaces)
+        values = {k: shlex.quote(str(v)) for k, v in values.items()}
+        try:
+            script = script_format.format(**values)
+        except (KeyError, IndexError, ValueError) as e:
+            raise ValidationError(f"invalid --sign-script '{script_format}': {type(e).__name__}: {e}. "
+                                  f"Valid placeholders are {', '.join('{' + k + '}' for k in values)}, "
+                                  "literal braces must be doubled ('{{' and '}}').")
+        subprocess.check_call(script, shell=True, cwd=cwd)
 
         sign_files = []
         if sign_format in ["cert", "both"]:
@@ -1369,14 +1510,14 @@ class OVF(object):
         return sign_files
 
 
-    def sign_package(self, keyfile, script_format, ovf_file=None, mf_file=None, sign_alg="sha512", sign_format="cert"):
+    def sign_package(self, keyfile, script_format, ovf_file=None, mf_file=None, sign_alg="sha512", sign_format="cert", cwd=None):
         if ovf_file is None:
             ovf_file = f"{self.name}.ovf"
         if script_format is None:
             self.sign_manifest(keyfile, ovf_file=ovf_file, mf_file=mf_file, sign_alg=sign_alg)
             return [os.path.splitext(ovf_file)[0] + ".cert"]
         return self.sign_manifest_external(keyfile, script_format, ovf_file=ovf_file, mf_file=mf_file,
-                                           sign_alg=sign_alg, sign_format=sign_format)
+                                           sign_alg=sign_alg, sign_format=sign_format, cwd=cwd)
 
 
 def usage():
@@ -1417,6 +1558,9 @@ def usage():
     print("    - {p7s_file}: the path to the CMS signature file")
     print("    - {keyfile}: the path to the keyfile")
     print("    These arguments will be set by the ova-compose tool and passed to the script.")
+    print("    The file arguments are absolute paths. The script runs in the current directory.")
+    print("    The values are quoted for the shell, so the placeholders must not be quoted in the script.")
+    print("    Literal braces in the script must be doubled ('{{' and '}}').")
     print("    It is expected that the script signs the file given by {mf_file} and writes the signature to {cert_file}.")
     print("    Refer to the DMTF DSP0243 specification for more details on the signature format.")
     print("    With --sign-format p7s, the script is expected to write a DER encoded, detached CMS SignedData (RFC 5652)")
@@ -1599,7 +1743,7 @@ def main():
             sign_files = []
             if sign_keyfile is not None or sign_script is not None:
                 sign_files = ovf.sign_package(sign_keyfile, sign_script, ovf_file=ovf_file, mf_file=mf_file,
-                                              sign_alg=sign_alg, sign_format=sign_format)
+                                              sign_alg=sign_alg, sign_format=sign_format, cwd=pwd)
 
             # order: ovf, manifest, signature files, then the disks and other files
             all_files = [ovf_file, mf_file] + sign_files + disk_files

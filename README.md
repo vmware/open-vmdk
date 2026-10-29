@@ -280,6 +280,8 @@ Options:
 
 `--sign-script` takes a command line in Python format string style. These placeholders are replaced before the command is run:
 `{ovf_file}`, `{mf_file}`, `{sign_alg}`, `{cert_file}`, `{p7s_file}` and `{keyfile}`.
+The file placeholders are replaced with absolute paths. The command runs in the directory `ova-compose` was started in, so relative paths in it (for example to key files) are relative to that directory.
+The command is run by the shell, and the values are quoted for it, so do not put quotes around the placeholders. Literal braces in the command, for example in `${VAR}`, must be doubled: `${{VAR}}`.
 
 The script runs once, after the manifest has been written. What it has to create depends on `--sign-format`:
 * `cert`: the legacy certificate file `{cert_file}` as defined in DMTF DSP0243.
