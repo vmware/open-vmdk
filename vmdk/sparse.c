@@ -689,7 +689,9 @@ typedef struct {
 
     StreamOptimizedDiskInfo *sodi;
     DiskInfo *src;
-    off_t readPos;
+    off_t readPos;      /* grain aligned, next grain to hand out */
+    off_t dataEnd;      /* end of the current data region (exclusive) */
+    bool useNextData;   /* skip holes using src->vmt->nextData() */
 
     GrainThreadState state;
 } GrainThreadContext;
@@ -702,6 +704,7 @@ static void
     StreamOptimizedDiskInfo *sodi = gtCtx->sodi;
     SparseExtentHeader *hdr = &sodi->diskHdr;
     off_t capacity = gtCtx->src->vmt->getCapacity(gtCtx->src);
+    off_t grainBytes = hdr->grainSize * VMDK_SECTOR_SIZE;
 
     if (initGrain(sodi, &grain) == false) {
         goto fail;
@@ -724,6 +727,39 @@ static void
         }
         pthread_mutex_unlock(&gtCtx->stateMutex);
 
+        /* Skip holes: once the current data region is used up, find the next
+           one. Ask from readPos, the first grain not handed out yet: data
+           after dataEnd in an already handed out grain is covered. */
+        if (gtCtx->useNextData && readPos < capacity && readPos >= gtCtx->dataEnd) {
+            off_t pos = 0, end = readPos;
+
+            if (gtCtx->src->vmt->nextData(gtCtx->src, &pos, &end) != 0) {
+                if (errno != ENXIO) {
+                    fprintf(stderr, "Failed to find next data region at %lld: %s\n",
+                            (long long)readPos, strerror(errno));
+                    pthread_mutex_unlock(&gtCtx->readPosMutex);
+                    goto fail;
+                }
+                /* no more data */
+                readPos = capacity;
+            } else {
+                if (end <= readPos) {
+                    fprintf(stderr, "Invalid data region %lld-%lld at %lld\n",
+                            (long long)pos, (long long)end, (long long)readPos);
+                    pthread_mutex_unlock(&gtCtx->readPosMutex);
+                    goto fail;
+                }
+                /* data regions are block aligned, not grain aligned */
+                pos &= ~(grainBytes - 1);
+                /* never hand out a grain twice */
+                if (pos > readPos) {
+                    readPos = pos;
+                }
+                gtCtx->dataEnd = end;
+            }
+            gtCtx->readPos = readPos;
+        }
+
         // Check if all work is done globally
         if (readPos >= capacity) {
             pthread_mutex_lock(&gtCtx->stateMutex);
@@ -738,12 +774,12 @@ static void
 
         // Calculate how much this thread should read
         remaining = capacity - readPos;
-        readLen = hdr->grainSize * VMDK_SECTOR_SIZE;
+        readLen = grainBytes;
         if (remaining < (off_t)readLen) {
             readLen = (size_t)remaining;
         }
 
-        uint64_t grainNr = readPos / (hdr->grainSize * VMDK_SECTOR_SIZE);
+        uint64_t grainNr = readPos / grainBytes;
         resetGrain(&grain, grainNr);
 
         /* Advance global position before reading and unlock,
@@ -1142,6 +1178,9 @@ StreamOptimizedCopyDisk(DiskInfo *src,
     gtCtx.sodi = sodi;
     gtCtx.src = src;
     gtCtx.readPos = 0;
+    gtCtx.dataEnd = 0;
+    /* Without nextData (e.g. a pipe), read everything and rely on isZeroed() */
+    gtCtx.useNextData = src->vmt->nextData != NULL;
     gtCtx.state = GT_STATE_RUNNING;
 
     // Create threads with error checking
