@@ -691,7 +691,6 @@ typedef struct {
     DiskInfo *src;
     off_t readPos;      /* grain aligned, next grain to hand out */
     off_t dataEnd;      /* end of the current data region (exclusive) */
-    bool useNextData;   /* skip holes using src->vmt->nextData() */
 
     GrainThreadState state;
 } GrainThreadContext;
@@ -729,8 +728,10 @@ static void
 
         /* Skip holes: once the current data region is used up, find the next
            one. Ask from readPos, the first grain not handed out yet: data
-           after dataEnd in an already handed out grain is covered. */
-        if (gtCtx->useNextData && readPos < capacity && readPos >= gtCtx->dataEnd) {
+           after dataEnd in an already handed out grain is covered.
+           Without nextData (e.g. a pipe), read everything and rely on
+           isZeroed(). */
+        if (gtCtx->src->vmt->nextData != NULL && readPos < capacity && readPos >= gtCtx->dataEnd) {
             off_t pos = 0, end = readPos;
 
             if (gtCtx->src->vmt->nextData(gtCtx->src, &pos, &end) != 0) {
@@ -1179,8 +1180,6 @@ StreamOptimizedCopyDisk(DiskInfo *src,
     gtCtx.src = src;
     gtCtx.readPos = 0;
     gtCtx.dataEnd = 0;
-    /* Without nextData (e.g. a pipe), read everything and rely on isZeroed() */
-    gtCtx.useNextData = src->vmt->nextData != NULL;
     gtCtx.state = GT_STATE_RUNNING;
 
     // Create threads with error checking
