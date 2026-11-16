@@ -86,9 +86,13 @@ FlatNextData(DiskInfo *self,
     off_t holeOff;
 
     if (dataOff == -1) {
-        if (errno == ENXIO) {
+        if (errno != EINVAL && errno != ESPIPE && errno != EOPNOTSUPP) {
+            /* ENXIO: no more data, anything else is an error */
             return -1;
         }
+        /* SEEK_DATA is not supported by this kernel, filesystem or file
+           type: treat the rest of the file as data. Callers expect ENXIO
+           at the end of the data, errno still holds the lseek() error. */
         dataOff = pos;
         holeOff = fdi->capacity;
         if (dataOff >= holeOff) {
@@ -98,7 +102,13 @@ FlatNextData(DiskInfo *self,
     } else {
         holeOff = lseek(fdi->fd, dataOff, SEEK_HOLE);
         if (holeOff == -1) {
-            holeOff = fdi->capacity;
+            /* SEEK_DATA worked, so SEEK_HOLE is supported. ENXIO means the
+               file was truncated under us, which must not look like the
+               end of the data. */
+            if (errno == ENXIO) {
+                errno = EIO;
+            }
+            return -1;
         }
     }
     *end = holeOff;

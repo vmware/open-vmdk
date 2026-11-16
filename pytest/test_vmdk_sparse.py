@@ -231,18 +231,27 @@ def test_empty_is_fast():
     assert vmdk_grains(vmdk) == []
 
 
-NO_SEEK_DATA_SRC = r"""
+# lseek() shim: SEEK_DATA and SEEK_HOLE fail with the errno given in
+# SEEK_DATA_ERRNO and SEEK_HOLE_ERRNO, if set.
+LSEEK_SHIM_SRC = r"""
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 static off_t (*real_lseek)(int, off_t, int);
 
 off_t lseek(int fd, off_t off, int whence)
 {
-    if (whence == SEEK_DATA || whence == SEEK_HOLE) {
-        errno = EINVAL;
+    const char *err = NULL;
+
+    if (whence == SEEK_DATA)
+        err = getenv("SEEK_DATA_ERRNO");
+    else if (whence == SEEK_HOLE)
+        err = getenv("SEEK_HOLE_ERRNO");
+    if (err) {
+        errno = atoi(err);
         return -1;
     }
     if (!real_lseek)
@@ -256,26 +265,51 @@ off_t lseek64(int fd, off_t off, int whence)
 }
 """
 
+SMALL_LAYOUT = [(0, 10, "random"), (100 * MiB + 1, 5000, "random"), (256 * MiB, 1000, "random")]
 
-@pytest.mark.parametrize("threads", [["-n", "1"], ["-n", "3"]], ids=["n1", "n3"])
-def test_no_seek_data(threads):
-    """Without SEEK_DATA support, the whole file is data and every grain is read."""
+
+@pytest.fixture(scope="module")
+def lseek_shim():
     if shutil.which("gcc") is None:
         pytest.skip("gcc is needed to build the lseek shim")
 
-    shim_c = os.path.join(WORK_DIR, "no_seek_data.c")
-    shim = os.path.join(WORK_DIR, "no_seek_data.so")
-    if not os.path.exists(shim):
-        with open(shim_c, "w") as f:
-            f.write(NO_SEEK_DATA_SRC)
-        subprocess.check_call(["gcc", "-shared", "-fPIC", "-o", shim, shim_c, "-ldl"])
+    shim_c = os.path.join(WORK_DIR, "lseek_shim.c")
+    shim = os.path.join(WORK_DIR, "lseek_shim.so")
+    with open(shim_c, "w") as f:
+        f.write(LSEEK_SHIM_SRC)
+    subprocess.check_call(["gcc", "-shared", "-fPIC", "-o", shim, shim_c, "-ldl"])
 
     img = os.path.join(WORK_DIR, "small.img")
-    make_image(img, 256 * MiB + 1000,
-               [(0, 10, "random"), (100 * MiB + 1, 5000, "random"), (256 * MiB, 1000, "random")])
+    make_image(img, 256 * MiB + 1000, SMALL_LAYOUT)
+
+    return shim, img
+
+
+@pytest.mark.parametrize("err", ["EINVAL", "ESPIPE", "EOPNOTSUPP"])
+@pytest.mark.parametrize("threads", [["-n", "1"], ["-n", "3"]], ids=["n1", "n3"])
+def test_no_seek_data(lseek_shim, threads, err):
+    """Without SEEK_DATA support, the whole file is data and every grain is read."""
+    shim, img = lseek_shim
     vmdk = os.path.join(WORK_DIR, "small.vmdk")
     back = os.path.join(WORK_DIR, "small-back.img")
 
-    env = dict(os.environ, LD_PRELOAD=shim)
+    env = dict(os.environ, LD_PRELOAD=shim, SEEK_DATA_ERRNO=str(getattr(errno, err)))
     subprocess.check_call([VMDK_CONVERT] + threads + [img, vmdk], cwd=WORK_DIR, env=env)
     check_vmdk(img, vmdk, back)
+
+
+@pytest.mark.parametrize("whence,err", [
+    ("SEEK_DATA", "EIO"),
+    ("SEEK_HOLE", "EIO"),
+    # the file was truncated during the conversion, not the end of the data
+    ("SEEK_HOLE", "ENXIO"),
+])
+@pytest.mark.parametrize("dst", ["small-err.vmdk", "small-err.img"])
+def test_seek_error(lseek_shim, whence, err, dst):
+    """Other lseek() errors fail the conversion, to VMDK (threads) and to raw (copyDisk)."""
+    shim, img = lseek_shim
+    dst = os.path.join(WORK_DIR, dst)
+
+    env = dict(os.environ, LD_PRELOAD=shim, **{f"{whence}_ERRNO": str(getattr(errno, err))})
+    process = subprocess.run([VMDK_CONVERT, img, dst], cwd=WORK_DIR, env=env)
+    assert process.returncode != 0, f"conversion succeeded although {whence} failed with {err}"
