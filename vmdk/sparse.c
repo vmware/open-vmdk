@@ -732,9 +732,10 @@ static void
            Without nextData (e.g. a pipe), read everything and rely on
            isZeroed(). */
         if (gtCtx->src->vmt->nextData != NULL && readPos < capacity && readPos >= gtCtx->dataEnd) {
-            off_t pos = 0, end = readPos;
+            off_t end;
+            off_t pos = gtCtx->src->vmt->nextData(gtCtx->src, readPos, &end);
 
-            if (gtCtx->src->vmt->nextData(gtCtx->src, &pos, &end) != 0) {
+            if (pos < 0) {
                 if (errno != ENXIO) {
                     fprintf(stderr, "Failed to find next data region at %lld: %s\n",
                             (long long)readPos, strerror(errno));
@@ -1445,19 +1446,19 @@ SparseGetCapacity(DiskInfo *self)
     return sdi->diskHdr.capacity * VMDK_SECTOR_SIZE;
 }
 
-static int
+static off_t
 SparseNextData(DiskInfo *self,
-               off_t *pos,
+               off_t pos,
                off_t *end)
 {
     SparseDiskInfo *sdi = getSDI(self);
-    off_t p = *end;
-    uint32_t grainNr = p / (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE);
-    uint32_t skip = p & (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE - 1);
+    uint32_t grainNr = pos / (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE);
+    uint32_t skip = pos & (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE - 1);
+    off_t dataPos = 0;
     bool want = false;
 
-    /* The last grain may be partial, so p can be within a grain that has data, but past the end of the disk. */
-    if (p >= SparseGetCapacity(self)) {
+    /* The last grain may be partial, so pos can be within a grain that has data, but past the end of the disk. */
+    if (pos >= SparseGetCapacity(self)) {
         errno = ENXIO;
         return -1;
     }
@@ -1468,9 +1469,9 @@ SparseNextData(DiskInfo *self,
         if (empty == want) {
             if (want) {
                 *end = grainNr * (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE);
-                return 0;
+                return dataPos;
             }
-            *pos = grainNr * (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE) | skip;
+            dataPos = grainNr * (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE) | skip;
             want = true;
         }
         skip = 0;
@@ -1478,7 +1479,7 @@ SparseNextData(DiskInfo *self,
     }
     if (want) {
         *end = sdi->gtInfo.lastGrainNr * (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE) + sdi->gtInfo.lastGrainSize;
-        return 0;
+        return dataPos;
     }
     errno = ENXIO;
     return -1;

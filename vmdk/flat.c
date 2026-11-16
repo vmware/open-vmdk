@@ -76,20 +76,20 @@ FlatClose(DiskInfo *self)
     return close(fd);
 }
 
-static int
+static off_t
 FlatNextData(DiskInfo *self,
-             off_t *pos,
+             off_t pos,
              off_t *end)
 {
     FlatDiskInfo *fdi = getFDI(self);
-    off_t dataOff = lseek(fdi->fd, *end, SEEK_DATA);
+    off_t dataOff = lseek(fdi->fd, pos, SEEK_DATA);
     off_t holeOff;
 
     if (dataOff == -1) {
         if (errno == ENXIO) {
             return -1;
         }
-        dataOff = *end;
+        dataOff = pos;
         holeOff = fdi->capacity;
         if (dataOff >= holeOff) {
             errno = ENXIO;
@@ -101,10 +101,8 @@ FlatNextData(DiskInfo *self,
             holeOff = fdi->capacity;
         }
     }
-    *pos = dataOff;
     *end = holeOff;
-    return 0;
-    
+    return dataOff;
 }
 
 static DiskInfoVMT flatDiskInfoVMT = {
