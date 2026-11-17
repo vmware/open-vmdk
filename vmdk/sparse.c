@@ -745,18 +745,19 @@ static void
                 /* no more data */
                 readPos = capacity;
             } else {
-                if (end <= readPos) {
+                /* nextData() must return a non-empty region at or after
+                   readPos. Anything else would hand out a grain twice
+                   (pos < readPos), or ask for the same region again
+                   forever (end <= readPos). */
+                if (pos < readPos || end <= pos) {
                     fprintf(stderr, "Invalid data region %lld-%lld at %lld\n",
                             (long long)pos, (long long)end, (long long)readPos);
                     pthread_mutex_unlock(&gtCtx->readPosMutex);
                     goto fail;
                 }
-                /* data regions are block aligned, not grain aligned */
-                pos &= ~(grainBytes - 1);
-                /* never hand out a grain twice */
-                if (pos > readPos) {
-                    readPos = pos;
-                }
+                /* Data regions are block aligned, not grain aligned. Rounding
+                   down stays >= readPos, since readPos is grain aligned. */
+                readPos = pos & ~(grainBytes - 1);
                 gtCtx->dataEnd = end;
             }
             gtCtx->readPos = readPos;

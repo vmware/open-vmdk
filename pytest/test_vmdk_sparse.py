@@ -232,7 +232,8 @@ def test_empty_is_fast():
 
 
 # lseek() shim: SEEK_DATA and SEEK_HOLE fail with the errno given in
-# SEEK_DATA_ERRNO and SEEK_HOLE_ERRNO, if set.
+# SEEK_DATA_ERRNO and SEEK_HOLE_ERRNO, if set. With SEEK_HOLE_SAME set,
+# SEEK_HOLE returns its offset, so every data region is empty.
 LSEEK_SHIM_SRC = r"""
 #define _GNU_SOURCE
 #include <dlfcn.h>
@@ -246,6 +247,8 @@ off_t lseek(int fd, off_t off, int whence)
 {
     const char *err = NULL;
 
+    if (whence == SEEK_HOLE && getenv("SEEK_HOLE_SAME"))
+        return off;
     if (whence == SEEK_DATA)
         err = getenv("SEEK_DATA_ERRNO");
     else if (whence == SEEK_HOLE)
@@ -281,6 +284,9 @@ def lseek_shim():
 
     img = os.path.join(WORK_DIR, "small.img")
     make_image(img, 256 * MiB + 1000, SMALL_LAYOUT)
+    # data not at the start, so the first region is after the read position
+    make_image(os.path.join(WORK_DIR, "late.img"), 16 * MiB,
+               [(1 * MiB + 100, 5000, "random"), (8 * MiB, 100, "random")])
 
     return shim, img
 
@@ -313,3 +319,24 @@ def test_seek_error(lseek_shim, whence, err, dst):
     env = dict(os.environ, LD_PRELOAD=shim, **{f"{whence}_ERRNO": str(getattr(errno, err))})
     process = subprocess.run([VMDK_CONVERT, img, dst], cwd=WORK_DIR, env=env)
     assert process.returncode != 0, f"conversion succeeded although {whence} failed with {err}"
+
+
+@pytest.mark.parametrize("args", [["-n", "1"], ["-n", "3"], [], ["-i"]],
+                         ids=["vmdk-n1", "vmdk-n3", "raw", "info"])
+def test_empty_data_region(lseek_shim, args):
+    """An empty data region from nextData() is an error. It must not be
+    accepted, and must not make the raw copy or -i loop forever."""
+    shim, _ = lseek_shim
+    img = os.path.join(WORK_DIR, "late.img")
+    if args == []:
+        cmd = [VMDK_CONVERT, img, os.path.join(WORK_DIR, "late-err.img")]
+    elif args == ["-i"]:
+        cmd = [VMDK_CONVERT, "-i", img]
+    else:
+        cmd = [VMDK_CONVERT] + args + [img, os.path.join(WORK_DIR, "late-err.vmdk")]
+
+    env = dict(os.environ, LD_PRELOAD=shim, SEEK_HOLE_SAME="1")
+    process = subprocess.run(cmd, cwd=WORK_DIR, env=env, timeout=30,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    assert process.returncode != 0, "an empty data region was accepted"
+    assert b"Invalid data region" in process.stderr
