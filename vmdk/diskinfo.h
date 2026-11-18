@@ -26,7 +26,10 @@ typedef struct {
     off_t (*getCapacity)(DiskInfo *self);
     ssize_t (*pread)(DiskInfo *self, void *buf, size_t len, off_t pos);
     ssize_t (*pwrite)(DiskInfo *self, const void *buf, size_t len, off_t pos);
-    int (*nextData)(DiskInfo *self, off_t *pos, off_t *end);
+    /* Returns the start of the first data region at or after pos, and sets
+       *end to the end of that region (exclusive). Returns -1 with errno set
+       to ENXIO if there is no more data, or to another value on error. */
+    off_t (*nextData)(DiskInfo *self, off_t pos, off_t *end);
     int (*close)(DiskInfo *self);
     int (*abort)(DiskInfo *self);
     ssize_t (*copyDisk)(DiskInfo *self, DiskInfo *src, int numThreads);

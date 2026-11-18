@@ -689,7 +689,8 @@ typedef struct {
 
     StreamOptimizedDiskInfo *sodi;
     DiskInfo *src;
-    off_t readPos;
+    off_t readPos;      /* grain aligned, next grain to hand out */
+    off_t dataEnd;      /* end of the current data region (exclusive) */
 
     GrainThreadState state;
 } GrainThreadContext;
@@ -702,6 +703,7 @@ static void
     StreamOptimizedDiskInfo *sodi = gtCtx->sodi;
     SparseExtentHeader *hdr = &sodi->diskHdr;
     off_t capacity = gtCtx->src->vmt->getCapacity(gtCtx->src);
+    off_t grainBytes = hdr->grainSize * VMDK_SECTOR_SIZE;
 
     if (initGrain(sodi, &grain) == false) {
         goto fail;
@@ -724,6 +726,43 @@ static void
         }
         pthread_mutex_unlock(&gtCtx->stateMutex);
 
+        /* Skip holes: once the current data region is used up, find the next
+           one. Ask from readPos, the first grain not handed out yet: data
+           after dataEnd in an already handed out grain is covered.
+           Without nextData (e.g. a pipe), read everything and rely on
+           isZeroed(). */
+        if (gtCtx->src->vmt->nextData != NULL && readPos < capacity && readPos >= gtCtx->dataEnd) {
+            off_t end;
+            off_t pos = gtCtx->src->vmt->nextData(gtCtx->src, readPos, &end);
+
+            if (pos < 0) {
+                if (errno != ENXIO) {
+                    fprintf(stderr, "Failed to find next data region at %lld: %s\n",
+                            (long long)readPos, strerror(errno));
+                    pthread_mutex_unlock(&gtCtx->readPosMutex);
+                    goto fail;
+                }
+                /* no more data */
+                readPos = capacity;
+            } else {
+                /* nextData() must return a non-empty region at or after
+                   readPos. Anything else would hand out a grain twice
+                   (pos < readPos), or ask for the same region again
+                   forever (end <= readPos). */
+                if (pos < readPos || end <= pos) {
+                    fprintf(stderr, "Invalid data region %lld-%lld at %lld\n",
+                            (long long)pos, (long long)end, (long long)readPos);
+                    pthread_mutex_unlock(&gtCtx->readPosMutex);
+                    goto fail;
+                }
+                /* Data regions are block aligned, not grain aligned. Rounding
+                   down stays >= readPos, since readPos is grain aligned. */
+                readPos = pos & ~(grainBytes - 1);
+                gtCtx->dataEnd = end;
+            }
+            gtCtx->readPos = readPos;
+        }
+
         // Check if all work is done globally
         if (readPos >= capacity) {
             pthread_mutex_lock(&gtCtx->stateMutex);
@@ -738,12 +777,12 @@ static void
 
         // Calculate how much this thread should read
         remaining = capacity - readPos;
-        readLen = hdr->grainSize * VMDK_SECTOR_SIZE;
+        readLen = grainBytes;
         if (remaining < (off_t)readLen) {
             readLen = (size_t)remaining;
         }
 
-        uint64_t grainNr = readPos / (hdr->grainSize * VMDK_SECTOR_SIZE);
+        uint64_t grainNr = readPos / grainBytes;
         resetGrain(&grain, grainNr);
 
         /* Advance global position before reading and unlock,
@@ -1142,6 +1181,7 @@ StreamOptimizedCopyDisk(DiskInfo *src,
     gtCtx.sodi = sodi;
     gtCtx.src = src;
     gtCtx.readPos = 0;
+    gtCtx.dataEnd = 0;
     gtCtx.state = GT_STATE_RUNNING;
 
     // Create threads with error checking
@@ -1407,19 +1447,19 @@ SparseGetCapacity(DiskInfo *self)
     return sdi->diskHdr.capacity * VMDK_SECTOR_SIZE;
 }
 
-static int
+static off_t
 SparseNextData(DiskInfo *self,
-               off_t *pos,
+               off_t pos,
                off_t *end)
 {
     SparseDiskInfo *sdi = getSDI(self);
-    off_t p = *end;
-    uint32_t grainNr = p / (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE);
-    uint32_t skip = p & (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE - 1);
+    uint32_t grainNr = pos / (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE);
+    uint32_t skip = pos & (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE - 1);
+    off_t dataPos = 0;
     bool want = false;
 
-    /* The last grain may be partial, so p can be within a grain that has data, but past the end of the disk. */
-    if (p >= SparseGetCapacity(self)) {
+    /* The last grain may be partial, so pos can be within a grain that has data, but past the end of the disk. */
+    if (pos >= SparseGetCapacity(self)) {
         errno = ENXIO;
         return -1;
     }
@@ -1430,9 +1470,9 @@ SparseNextData(DiskInfo *self,
         if (empty == want) {
             if (want) {
                 *end = grainNr * (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE);
-                return 0;
+                return dataPos;
             }
-            *pos = grainNr * (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE) | skip;
+            dataPos = grainNr * (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE) | skip;
             want = true;
         }
         skip = 0;
@@ -1440,7 +1480,7 @@ SparseNextData(DiskInfo *self,
     }
     if (want) {
         *end = sdi->gtInfo.lastGrainNr * (sdi->diskHdr.grainSize * VMDK_SECTOR_SIZE) + sdi->gtInfo.lastGrainSize;
-        return 0;
+        return dataPos;
     }
     errno = ENXIO;
     return -1;

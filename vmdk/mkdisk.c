@@ -85,13 +85,21 @@ copyDisk(DiskInfo *src, DiskInfo *dst, int numThreads)
             goto failAll;
         }
     } else {
-        off_t end = 0;
-        off_t pos;
+        off_t pos = 0;
+        off_t next;
+        off_t end;
 
-        while (src->vmt->nextData(src, &pos, &end) == 0) {
-            if (copyData(dst, pos, src, pos, end - pos)) {
+        while ((next = src->vmt->nextData(src, pos, &end)) >= 0) {
+            /* a region before pos or an empty one would loop forever */
+            if (next < pos || end <= next) {
+                fprintf(stderr, "Invalid data region %lld-%lld at %lld\n",
+                        (long long)next, (long long)end, (long long)pos);
                 goto failAll;
             }
+            if (copyData(dst, next, src, next, end - next)) {
+                goto failAll;
+            }
+            pos = end;
         }
         if (errno != ENXIO) {
             goto failAll;
@@ -469,11 +477,19 @@ main(int argc,
             }
         } else if (doInfo) {
             off_t capacity = di->vmt->getCapacity(di);
-            off_t end = 0;
-            off_t pos;
+            off_t pos = 0;
+            off_t next;
+            off_t end;
             off_t usedSpace = 0;
-            while (di->vmt->nextData(di, &pos, &end) == 0) {
-                usedSpace += end - pos;
+            while ((next = di->vmt->nextData(di, pos, &end)) >= 0) {
+                /* a region before pos or an empty one would loop forever */
+                if (next < pos || end <= next) {
+                    fprintf(stderr, "Invalid data region %lld-%lld at %lld\n",
+                            (long long)next, (long long)end, (long long)pos);
+                    exit(1);
+                }
+                usedSpace += end - next;
+                pos = end;
             }
             printf("{ \"capacity\": %llu, \"used\": %llu",
                     (unsigned long long)capacity, (unsigned long long)usedSpace);
