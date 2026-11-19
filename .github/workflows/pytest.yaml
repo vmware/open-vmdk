@@ -2,6 +2,9 @@ name: open-vmdk pytests
 
 on: [pull_request, push, workflow_dispatch]
 
+permissions:
+  contents: read
+
 jobs:
     pytests:
         runs-on: ubuntu-latest
